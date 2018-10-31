@@ -14,12 +14,12 @@ static apr_status_t redirectionio_read_json_handler(redirectionio_connection *co
 
 apr_status_t redirectionio_protocol_match(redirectionio_context *ctx, request_rec *r, const char *project_key) {
     apr_size_t      wlen, clen;
-    unsigned char   *dst;
+    char            *dst;
     apr_status_t    rv;
     cJSON           *result;
 
     wlen = sizeof(COMMAND_MATCH_QUERY) + strlen(project_key) + strlen(r->unparsed_uri) + strlen(r->hostname) - 6;
-    dst = (unsigned char *) apr_palloc(r->pool, wlen);
+    dst = (char *) apr_palloc(r->pool, wlen);
     sprintf(dst, COMMAND_MATCH_QUERY, project_key, r->unparsed_uri, r->hostname);
 
     clen = sizeof(COMMAND_MATCH_NAME);
@@ -72,11 +72,11 @@ apr_status_t redirectionio_protocol_match(redirectionio_context *ctx, request_re
 
 apr_status_t redirectionio_protocol_log(redirectionio_context *ctx, request_rec *r, const char *project_key) {
     apr_size_t      wlen, clen;
-    char            *location = apr_table_get(r->headers_out, "Location");
-    char            *user_agent = apr_table_get(r->headers_in, "User-Agent");
-    char            *referer = apr_table_get(r->headers_in, "Referer");
+    const char      *location = apr_table_get(r->headers_out, "Location");
+    const char      *user_agent = apr_table_get(r->headers_in, "User-Agent");
+    const char      *referer = apr_table_get(r->headers_in, "Referer");
     apr_status_t    rv;
-    unsigned char   *dst;
+    char            *dst;
 
     if (location == NULL) {
         location = "";
@@ -103,7 +103,7 @@ apr_status_t redirectionio_protocol_log(redirectionio_context *ctx, request_rec 
         - 16 // 8 * 2 (%x) characters replaced with values
     ;
 
-    dst = (unsigned char *) apr_palloc(r->pool, wlen);
+    dst = (char *) apr_palloc(r->pool, wlen);
 
     sprintf(
         dst,
@@ -138,6 +138,11 @@ apr_status_t redirectionio_protocol_log(redirectionio_context *ctx, request_rec 
     return APR_SUCCESS;
 }
 
+static apr_status_t redirectionio_json_cleanup(void *data) {
+    cJSON_Delete((cJSON *)data);
+
+    return APR_SUCCESS;
+}
 
 static apr_status_t redirectionio_read_json_handler(redirectionio_connection *conn, apr_pool_t *pool, cJSON **json) {
     apr_size_t      rlen = 1;
@@ -147,7 +152,7 @@ static apr_status_t redirectionio_read_json_handler(redirectionio_connection *co
     char            *buffer;
     char            read;
 
-    buffer = (u_char *) apr_palloc(pool, max_size);
+    buffer = (char *) apr_palloc(pool, max_size);
 
     for (;;) {
         rlen = 1;
@@ -169,9 +174,12 @@ static apr_status_t redirectionio_read_json_handler(redirectionio_connection *co
             *buffer = '\0';
             *json = cJSON_Parse((char *)(buffer - len));
 
-//            cln = ngx_pool_cleanup_add(r->pool, 0);
-//            cln->handler = ngx_http_redirectionio_json_cleanup;
-//            cln->data = json;
+            apr_pool_cleanup_register(
+                pool,
+                *json,
+                redirectionio_json_cleanup,
+                apr_pool_cleanup_null
+            );
 
             return APR_SUCCESS;
         }

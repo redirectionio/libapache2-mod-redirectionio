@@ -156,7 +156,6 @@ static apr_status_t redirectionio_create_connection(redirectionio_connection *co
         return rv;
     }
 
-
     /* set socket options */
     rv = apr_socket_opt_set(conn->rio_sock, APR_SO_NONBLOCK, 0);
 
