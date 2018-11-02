@@ -3,6 +3,16 @@
 
 #include "apr_network_io.h"
 
+#ifndef APR_UNIX
+#if defined (AF_UNIX)
+#define APR_UNIX    AF_UNIX
+#elif defined(AF_LOCAL)
+#define APR_UNIX    AF_LOCAL
+#else
+#error "Neither AF_UNIX nor AF_LOCAL is defined"
+#endif
+#endif
+
 #define UNIX 0
 #define TCP 1
 

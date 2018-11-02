@@ -6,11 +6,11 @@ SRC=src/mod_redirectionio.c \
 all: src/mod_redirectionio.la
 
 src/mod_redirectionio.la: $(SRC) src/mod_redirectionio.h src/json.h src/redirectionio_protocol.h
-	/usr/bin/apxs2 -Wc,"-std=c99  " -Wl,"" -lm -Wc,-Wall -Wc,-g -c $(SRC)
+	apxs -Wc,"-std=c99  " -Wl,"" -lm -Wc,-Wall -Wc,-g -c $(SRC)
 
 .PHONY:	install
 install: src/mod_redirectionio.la
-	/usr/bin/apxs2 -i -n redirectionio src/mod_redirectionio.la
+	apxs -i -n redirectionio src/mod_redirectionio.la
 
 .PHONY:	clean
 clean:
