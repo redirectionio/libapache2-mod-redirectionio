@@ -19,6 +19,7 @@ static int redirectionio_log_handler(request_rec *r);
 static apr_status_t redirectionio_create_connection(redirectionio_connection *conn, redirectionio_config *config, apr_pool_t *pool);
 static redirectionio_connection* redirectionio_acquire_connection(redirectionio_config *config, apr_pool_t *pool);
 static apr_status_t redirectionio_release_connection(redirectionio_connection *conn, redirectionio_config *config, apr_pool_t *pool);
+static apr_status_t redirectionio_invalidate_connection(redirectionio_connection *conn, redirectionio_config *config, apr_pool_t *pool);
 
 static void *create_redirectionio_dir_conf(apr_pool_t *pool, char *context);
 static void *merge_redirectionio_dir_conf(apr_pool_t *pool, void *BASE, void *ADD);
@@ -80,7 +81,7 @@ static int redirectionio_redirect_handler(request_rec *r) {
 
     // Ask for redirection
     if (redirectionio_protocol_match(conn, context, r, config->project_key) != APR_SUCCESS) {
-        redirectionio_release_connection(conn, config, r->pool);
+        redirectionio_invalidate_connection(conn, config, r->pool);
 
         return DECLINED;
     }
@@ -127,7 +128,7 @@ static int redirectionio_log_handler(request_rec *r) {
     }
 
     if (redirectionio_protocol_log(conn, context, r, config->project_key) != APR_SUCCESS) {
-        redirectionio_release_connection(conn, config, r->pool);
+        redirectionio_invalidate_connection(conn, config, r->pool);
 
         return DECLINED;
     }
@@ -145,7 +146,6 @@ static apr_status_t redirectionio_create_connection(redirectionio_connection *co
         family = APR_UNIX;
     }
 
-    ap_log_perror(APLOG_MARK, APLOG_NOTICE, 0, pool, "mod_redirectionio: Connecting to server: %s", config->server);
     rv = apr_sockaddr_info_get(&conn->rio_addr, config->server, family, config->port, 0, pool);
 
     if (rv != APR_SUCCESS) {
@@ -218,6 +218,16 @@ static apr_status_t redirectionio_release_connection(redirectionio_connection *c
 
     if (rv != APR_SUCCESS) {
         ap_log_perror(APLOG_MARK, APLOG_ERR, 0, pool, "mod_redirectionio: Can not release RIO socket.");
+    }
+
+    return rv;
+}
+
+static apr_status_t redirectionio_invalidate_connection(redirectionio_connection *conn, redirectionio_config *config, apr_pool_t *pool) {
+    apr_status_t rv = apr_reslist_invalidate(config->connection_pool, conn);
+
+    if (rv != APR_SUCCESS) {
+        ap_log_perror(APLOG_MARK, APLOG_ERR, 0, pool, "mod_redirectionio: Can not invalidate RIO socket.");
     }
 
     return rv;
@@ -336,7 +346,6 @@ static apr_status_t redirectionio_pool_destruct(void* resource, void* params, ap
 static apr_status_t redirectionio_child_exit(void *resource) {
     apr_reslist_t   *connection_pool = (apr_reslist_t *)resource;
     apr_pool_t      *pool;
-
     apr_pool_create(&pool, NULL);
 
     while (apr_reslist_acquired_count(connection_pool) != 0) {

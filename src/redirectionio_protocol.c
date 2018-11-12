@@ -75,6 +75,7 @@ apr_status_t redirectionio_protocol_log(redirectionio_connection *conn, redirect
     const char      *location = apr_table_get(r->headers_out, "Location");
     const char      *user_agent = apr_table_get(r->headers_in, "User-Agent");
     const char      *referer = apr_table_get(r->headers_in, "Referer");
+    const char      *matched_rule_id = ctx->matched_rule_id;
     apr_status_t    rv;
     char            *dst;
 
@@ -90,12 +91,16 @@ apr_status_t redirectionio_protocol_log(redirectionio_connection *conn, redirect
         referer = "";
     }
 
+    if (matched_rule_id == NULL) {
+        matched_rule_id = "";
+    }
+
     wlen =
         sizeof(COMMAND_LOG_QUERY)
         + strlen(project_key)
         + strlen(r->unparsed_uri)
         + strlen(r->hostname)
-        + strlen(ctx->matched_rule_id)
+        + strlen(matched_rule_id)
         + strlen(location)
         + 3 // Status code length
         + strlen(user_agent)
@@ -111,7 +116,7 @@ apr_status_t redirectionio_protocol_log(redirectionio_connection *conn, redirect
         project_key,
         r->unparsed_uri,
         r->hostname,
-        ctx->matched_rule_id,
+        matched_rule_id,
         location,
         r->status,
         user_agent,
