@@ -302,6 +302,7 @@ static void *merge_redirectionio_dir_conf(apr_pool_t *pool, void *parent, void *
         return conf;
     }
 
+    apr_reslist_timeout_set(conf->connection_pool, RIO_TIMEOUT);
     apr_pool_cleanup_register(pool, conf->connection_pool, redirectionio_child_exit, redirectionio_child_exit);
 
     return conf;
