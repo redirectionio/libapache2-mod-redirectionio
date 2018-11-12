@@ -17,9 +17,15 @@ static int redirectionio_redirect_handler(request_rec *r);
 static int redirectionio_log_handler(request_rec *r);
 
 static apr_status_t redirectionio_create_connection(redirectionio_connection *conn, redirectionio_config *config, apr_pool_t *pool);
+static redirectionio_connection* redirectionio_acquire_connection(redirectionio_config *config, apr_pool_t *pool);
+static apr_status_t redirectionio_release_connection(redirectionio_connection *conn, redirectionio_config *config, apr_pool_t *pool);
 
 static void *create_redirectionio_dir_conf(apr_pool_t *pool, char *context);
 static void *merge_redirectionio_dir_conf(apr_pool_t *pool, void *BASE, void *ADD);
+
+static apr_status_t redirectionio_pool_construct(void** rs, void* params, apr_pool_t* pool);
+static apr_status_t redirectionio_pool_destruct(void* resource, void* params, apr_pool_t* pool);
+static apr_status_t redirectionio_child_exit(void *resource);
 
 static const char *redirectionio_set_enable(cmd_parms *cmd, void *cfg, const char *arg);
 static const char *redirectionio_set_project_key(cmd_parms *cmd, void *cfg, const char *arg);
@@ -66,27 +72,23 @@ static int redirectionio_redirect_handler(request_rec *r) {
     }
 
     ap_set_module_config(r->request_config, &redirectionio_module, context);
+    redirectionio_connection* conn = redirectionio_acquire_connection(config, r->pool);
 
-    // Create connection
-    context->conn = apr_palloc(r->pool, sizeof(redirectionio_connection));
-
-    if (context->conn == NULL) {
-        ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, "Cannot create redirectionio context");
-
-        return DECLINED;
-    }
-
-    if (redirectionio_create_connection(context->conn, config, r->pool) != APR_SUCCESS) {
+    if (conn == NULL) {
         return DECLINED;
     }
 
     // Ask for redirection
-    if (redirectionio_protocol_match(context, r, config->project_key) != APR_SUCCESS) {
+    if (redirectionio_protocol_match(conn, context, r, config->project_key) != APR_SUCCESS) {
+        redirectionio_release_connection(conn, config, r->pool);
+
         return DECLINED;
     }
 
     // No match
     if (context->status == 0) {
+        redirectionio_release_connection(conn, config, r->pool);
+
         return DECLINED;
     }
 
@@ -95,6 +97,8 @@ static int redirectionio_redirect_handler(request_rec *r) {
     }
 
     r->status = context->status;
+
+    redirectionio_release_connection(conn, config, r->pool);
 
     return context->status;
 }
@@ -112,13 +116,23 @@ static int redirectionio_log_handler(request_rec *r) {
 
     redirectionio_context* context = ap_get_module_config(r->request_config, &redirectionio_module);
 
-    if (context == NULL || context->conn == NULL) {
+    if (context == NULL) {
         return DECLINED;
     }
 
-    if (redirectionio_protocol_log(context, r, config->project_key) != APR_SUCCESS) {
+    redirectionio_connection* conn = redirectionio_acquire_connection(config, r->pool);
+
+    if (conn == NULL) {
         return DECLINED;
     }
+
+    if (redirectionio_protocol_log(conn, context, r, config->project_key) != APR_SUCCESS) {
+        redirectionio_release_connection(conn, config, r->pool);
+
+        return DECLINED;
+    }
+
+    redirectionio_release_connection(conn, config, r->pool);
 
     return OK;
 }
@@ -173,20 +187,46 @@ static apr_status_t redirectionio_create_connection(redirectionio_connection *co
         return rv;
     }
 
-//    rv = apr_socket_timeout_set(conn->rio_sock, 0);
-//
-//    if (rv != APR_SUCCESS) {
-//        ap_log_perror(APLOG_MARK, APLOG_ERR, 0, pool, "mod_redirectionio: Error setting socket timeout: %s", apr_strerror(rv, errbuf, sizeof(errbuf)));
-//
-//        return rv;
-//    }
+    rv = apr_socket_timeout_set(conn->rio_sock, RIO_TIMEOUT);
+
+    if (rv != APR_SUCCESS) {
+        ap_log_perror(APLOG_MARK, APLOG_ERR, 0, pool, "mod_redirectionio: Error setting socket timeout: %s", apr_strerror(rv, errbuf, sizeof(errbuf)));
+
+        return rv;
+    }
 
     return APR_SUCCESS;
 }
 
+static redirectionio_connection* redirectionio_acquire_connection(redirectionio_config *config, apr_pool_t *pool) {
+    apr_status_t                rv;
+    redirectionio_connection    *conn;
+
+    rv = apr_reslist_acquire(config->connection_pool, (void**)&conn);
+
+    if (rv != APR_SUCCESS || !conn) {
+        ap_log_perror(APLOG_MARK, APLOG_ERR, 0, pool, "mod_redirectionio: Failed to acquire RIO connection from pool: %s",  apr_strerror(rv, errbuf, sizeof(errbuf)));
+
+        return NULL;
+    }
+
+    return conn;
+}
+
+static apr_status_t redirectionio_release_connection(redirectionio_connection *conn, redirectionio_config *config, apr_pool_t *pool) {
+    apr_status_t rv = apr_reslist_release(config->connection_pool, conn);
+
+    if (rv != APR_SUCCESS) {
+        ap_log_perror(APLOG_MARK, APLOG_ERR, 0, pool, "mod_redirectionio: Can not release RIO socket.");
+    }
+
+    return rv;
+}
+
 static void *create_redirectionio_dir_conf(apr_pool_t *pool, char *context) {
+    redirectionio_config    *config = apr_pcalloc(pool, sizeof(redirectionio_config));
+
     context = context ? context : "(undefined context)";
-    redirectionio_config *config = apr_pcalloc(pool, sizeof(redirectionio_config));
 
     if (config) {
         config->enable = -1;
@@ -201,9 +241,9 @@ static void *create_redirectionio_dir_conf(apr_pool_t *pool, char *context) {
 }
 
 static void *merge_redirectionio_dir_conf(apr_pool_t *pool, void *parent, void *current) {
-    redirectionio_config *conf_parent = (redirectionio_config *) parent;
-    redirectionio_config *conf_current = (redirectionio_config *) current;
-    redirectionio_config *conf = (redirectionio_config *) create_redirectionio_dir_conf(pool, "Merged configuration");
+    redirectionio_config    *conf_parent = (redirectionio_config *) parent;
+    redirectionio_config    *conf_current = (redirectionio_config *) current;
+    redirectionio_config    *conf = (redirectionio_config *) create_redirectionio_dir_conf(pool, "Merged configuration");
 
     /* Merge configurations */
     if (conf_current->enable == -1) {
@@ -234,7 +274,78 @@ static void *merge_redirectionio_dir_conf(apr_pool_t *pool, void *parent, void *
         conf->server = conf_current->server;
     }
 
+    if (apr_reslist_create(
+        &conf->connection_pool,
+        RIO_MIN_CONNECTIONS,
+        RIO_KEEP_CONNECTIONS,
+        RIO_MAX_CONNECTIONS,
+        0,
+        redirectionio_pool_construct,
+        redirectionio_pool_destruct,
+        conf,
+        pool
+    ) != APR_SUCCESS) {
+        ap_log_perror(APLOG_MARK, APLOG_CRIT, 0, pool, "mod_redirectionio: Failed to initialize resource pool, disabling redirectionio.");
+
+        conf->enable = 0;
+
+        return conf;
+    }
+
+    apr_pool_cleanup_register(pool, conf->connection_pool, redirectionio_child_exit, redirectionio_child_exit);
+
     return conf;
+}
+
+static apr_status_t redirectionio_pool_construct(void** rs, void* params, apr_pool_t* pool) {
+    redirectionio_config        *conf = (redirectionio_config *) params;
+    redirectionio_connection    *conn;
+    apr_status_t                rv;
+
+    if (conf->enable != 1) {
+        return APR_SUCCESS;
+    }
+
+    conn = apr_palloc(pool, sizeof(redirectionio_connection));
+    rv = redirectionio_create_connection(conn, conf, pool);
+
+    if (rv != APR_SUCCESS) {
+        return APR_EGENERAL;
+    }
+
+    *rs = conn;
+
+    if (!*rs) {
+        ap_log_perror(APLOG_MARK, APLOG_CRIT, 0, pool, "mod_redirectionio: Failed to store socket in resource list");
+
+        return APR_EGENERAL;
+    }
+
+    return APR_SUCCESS;
+}
+
+static apr_status_t redirectionio_pool_destruct(void* resource, void* params, apr_pool_t* pool) {
+    if (resource) {
+        redirectionio_connection *conn = (redirectionio_connection*)resource;
+        apr_socket_close(conn->rio_sock);
+    }
+
+    return APR_SUCCESS;
+}
+
+static apr_status_t redirectionio_child_exit(void *resource) {
+    apr_reslist_t   *connection_pool = (apr_reslist_t *)resource;
+    apr_pool_t      *pool;
+
+    apr_pool_create(&pool, NULL);
+
+    while (apr_reslist_acquired_count(connection_pool) != 0) {
+        ap_log_perror(APLOG_MARK, APLOG_ERR, 0, pool, "mod_redirectionio: Socket pool not empty: %i", apr_reslist_acquired_count(connection_pool));
+    }
+
+    apr_reslist_destroy(connection_pool);
+
+    return APR_SUCCESS;
 }
 
 static const char *redirectionio_set_enable(cmd_parms *cmd, void *cfg, const char *arg) {

@@ -12,7 +12,7 @@ const char COMMAND_LOG_QUERY[] = "{ \"project_id\": \"%s\", \"request_uri\": \"%
 
 static apr_status_t redirectionio_read_json_handler(redirectionio_connection *conn, apr_pool_t *pool, cJSON **json);
 
-apr_status_t redirectionio_protocol_match(redirectionio_context *ctx, request_rec *r, const char *project_key) {
+apr_status_t redirectionio_protocol_match(redirectionio_connection *conn, redirectionio_context *ctx, request_rec *r, const char *project_key) {
     apr_size_t      wlen, clen;
     char            *dst;
     apr_status_t    rv;
@@ -23,7 +23,7 @@ apr_status_t redirectionio_protocol_match(redirectionio_context *ctx, request_re
     sprintf(dst, COMMAND_MATCH_QUERY, project_key, r->unparsed_uri, r->hostname);
 
     clen = sizeof(COMMAND_MATCH_NAME);
-    rv = apr_socket_send(ctx->conn->rio_sock, COMMAND_MATCH_NAME, &clen);
+    rv = apr_socket_send(conn->rio_sock, COMMAND_MATCH_NAME, &clen);
 
     if (rv != APR_SUCCESS) {
         ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, "mod_redirectionio: Error sending match command: %s", apr_strerror(rv, errbuf, sizeof(errbuf)));
@@ -31,7 +31,7 @@ apr_status_t redirectionio_protocol_match(redirectionio_context *ctx, request_re
         return rv;
     }
 
-    rv = apr_socket_send(ctx->conn->rio_sock, dst, &wlen);
+    rv = apr_socket_send(conn->rio_sock, dst, &wlen);
 
     if (rv != APR_SUCCESS) {
         ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, "mod_redirectionio: Error sending match command data: %s", apr_strerror(rv, errbuf, sizeof(errbuf)));
@@ -39,7 +39,7 @@ apr_status_t redirectionio_protocol_match(redirectionio_context *ctx, request_re
         return rv;
     }
 
-    rv = redirectionio_read_json_handler(ctx->conn, r->pool, &result);
+    rv = redirectionio_read_json_handler(conn, r->pool, &result);
 
     if (rv != APR_SUCCESS) {
         ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, "mod_redirectionio: Error receiving match command result: %s", apr_strerror(rv, errbuf, sizeof(errbuf)));
@@ -70,7 +70,7 @@ apr_status_t redirectionio_protocol_match(redirectionio_context *ctx, request_re
     return APR_SUCCESS;
 }
 
-apr_status_t redirectionio_protocol_log(redirectionio_context *ctx, request_rec *r, const char *project_key) {
+apr_status_t redirectionio_protocol_log(redirectionio_connection *conn, redirectionio_context *ctx, request_rec *r, const char *project_key) {
     apr_size_t      wlen, clen;
     const char      *location = apr_table_get(r->headers_out, "Location");
     const char      *user_agent = apr_table_get(r->headers_in, "User-Agent");
@@ -119,7 +119,7 @@ apr_status_t redirectionio_protocol_log(redirectionio_context *ctx, request_rec 
     );
 
     clen = sizeof(COMMAND_LOG_NAME);
-    rv = apr_socket_send(ctx->conn->rio_sock, COMMAND_LOG_NAME, &clen);
+    rv = apr_socket_send(conn->rio_sock, COMMAND_LOG_NAME, &clen);
 
     if (rv != APR_SUCCESS) {
         ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, "mod_redirectionio: Error sending log command: %s", apr_strerror(rv, errbuf, sizeof(errbuf)));
@@ -127,7 +127,7 @@ apr_status_t redirectionio_protocol_log(redirectionio_context *ctx, request_rec 
         return rv;
     }
 
-    rv = apr_socket_send(ctx->conn->rio_sock, dst, &wlen);
+    rv = apr_socket_send(conn->rio_sock, dst, &wlen);
 
     if (rv != APR_SUCCESS) {
         ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, "mod_redirectionio: Error sending log command data: %s", apr_strerror(rv, errbuf, sizeof(errbuf)));
