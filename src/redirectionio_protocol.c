@@ -186,6 +186,10 @@ static apr_status_t redirectionio_read_json_handler(redirectionio_connection *co
             *buffer = '\0';
             *json = cJSON_Parse((char *)(buffer - len));
 
+            if (*json == NULL) {
+                return APR_EOF;
+            }
+
             apr_pool_cleanup_register(
                 pool,
                 *json,
