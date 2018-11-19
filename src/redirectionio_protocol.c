@@ -5,7 +5,7 @@
 
 static char errbuf[1024];
 
-const char COMMAND_MATCH_NAME[] = "MATCH";
+const char COMMAND_MATCH_NAME[] = "MATCH_WITH_RESPONSE";
 const char COMMAND_MATCH_QUERY[] = "{ \"project_id\": \"%s\", \"request_uri\": \"%s\", \"host\": \"%s\" }";
 const char COMMAND_LOG_NAME[] = "LOG";
 const char COMMAND_LOG_QUERY[] = "{ \"project_id\": \"%s\", \"request_uri\": \"%s\", \"host\": \"%s\", \"rule_id\": \"%s\", \"target\": \"%s\", \"status_code\": %d, \"user_agent\": \"%s\", \"referer\": \"%s\" }";
@@ -48,6 +48,7 @@ apr_status_t redirectionio_protocol_match(redirectionio_connection *conn, redire
     }
 
     cJSON *status = cJSON_GetObjectItem(result, "status_code");
+    cJSON *match_on_response_status = cJSON_GetObjectItem(result, "match_on_response_status");
     cJSON *location = cJSON_GetObjectItem(result, "location");
     cJSON *matched_rule = cJSON_GetObjectItem(result, "matched_rule");
     cJSON *rule_id = NULL;
@@ -59,6 +60,7 @@ apr_status_t redirectionio_protocol_match(redirectionio_connection *conn, redire
     if (matched_rule == NULL || matched_rule->type == cJSON_NULL) {
         ctx->matched_rule_id = "";
         ctx->status = 0;
+        ctx->match_on_response_status = 0;
 
         return APR_SUCCESS;
     }
@@ -66,6 +68,11 @@ apr_status_t redirectionio_protocol_match(redirectionio_connection *conn, redire
     ctx->matched_rule_id = rule_id->valuestring;
     ctx->target = location->valuestring;
     ctx->status = status->valueint;
+    ctx->match_on_response_status = 0;
+
+    if (match_on_response_status != NULL && match_on_response_status->type != cJSON_NULL) {
+        ctx->match_on_response_status = match_on_response_status->valueint;
+    }
 
     return APR_SUCCESS;
 }

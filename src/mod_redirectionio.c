@@ -13,8 +13,12 @@ static char errbuf[1024];
 
 static void redirectionio_register_hooks(apr_pool_t *p);
 
+static void ap_headers_insert_output_filter(request_rec *r);
+
 static int redirectionio_redirect_handler(request_rec *r);
 static int redirectionio_log_handler(request_rec *r);
+
+static apr_status_t redirectionio_filter_match_on_response(ap_filter_t *f, apr_bucket_brigade *b);
 
 static apr_status_t redirectionio_create_connection(redirectionio_connection *conn, redirectionio_config *config, apr_pool_t *pool);
 static redirectionio_connection* redirectionio_acquire_connection(redirectionio_config *config, apr_pool_t *pool);
@@ -54,6 +58,29 @@ module AP_MODULE_DECLARE_DATA redirectionio_module = {
 static void redirectionio_register_hooks(apr_pool_t *p) {
     ap_hook_handler(redirectionio_redirect_handler, NULL, NULL, APR_HOOK_FIRST);
     ap_hook_log_transaction(redirectionio_log_handler, NULL, NULL, APR_HOOK_MIDDLE);
+
+    ap_hook_insert_filter(ap_headers_insert_output_filter, NULL, NULL, APR_HOOK_LAST);
+    ap_hook_insert_error_filter(ap_headers_insert_output_filter, NULL, NULL, APR_HOOK_LAST);
+    ap_register_output_filter("redirectionio_redirect_filter", redirectionio_filter_match_on_response, NULL, AP_FTYPE_CONTENT_SET);
+}
+
+static void ap_headers_insert_output_filter(request_rec *r) {
+    redirectionio_config    *config = (redirectionio_config*) ap_get_module_config(r->per_dir_config, &redirectionio_module);
+    redirectionio_context   *ctx = ap_get_module_config(r->request_config, &redirectionio_module);
+
+    if (config->enable != 1) {
+        return;
+    }
+
+    if (ctx == NULL || ctx->status == 0 || ctx->match_on_response_status == 0 || ctx->is_redirected) {
+        return;
+    }
+
+    if (r->status != ctx->match_on_response_status) {
+        return;
+    }
+
+    ap_add_output_filter("redirectionio_redirect_filter", ctx, r, r->connection);
 }
 
 static int redirectionio_redirect_handler(request_rec *r) {
@@ -72,6 +99,10 @@ static int redirectionio_redirect_handler(request_rec *r) {
         return DECLINED;
     }
 
+    context->status = 0;
+    context->match_on_response_status = 0;
+    context->is_redirected = 0;
+
     ap_set_module_config(r->request_config, &redirectionio_module, context);
     redirectionio_connection* conn = redirectionio_acquire_connection(config, r->pool);
 
@@ -86,10 +117,14 @@ static int redirectionio_redirect_handler(request_rec *r) {
         return DECLINED;
     }
 
-    // No match
-    if (context->status == 0) {
-        redirectionio_release_connection(conn, config, r->pool);
+    redirectionio_release_connection(conn, config, r->pool);
 
+    // No match here
+    if (context->status == 0) {
+        return DECLINED;
+    }
+
+    if (context->match_on_response_status > 0) {
         return DECLINED;
     }
 
@@ -98,10 +133,25 @@ static int redirectionio_redirect_handler(request_rec *r) {
     }
 
     r->status = context->status;
-
-    redirectionio_release_connection(conn, config, r->pool);
+    context->is_redirected = 1;
 
     return context->status;
+}
+
+static apr_status_t redirectionio_filter_match_on_response(ap_filter_t *f, apr_bucket_brigade *bb) {
+    redirectionio_context   *ctx = (redirectionio_context *)f->ctx;
+
+    if (ctx->status != 410) {
+        apr_table_setn(f->r->headers_out, "Location", ctx->target);
+    }
+
+    f->r->status = ctx->status;
+    ctx->is_redirected = 1;
+
+    /* remove ourselves from the filter chain */
+    ap_remove_output_filter(f);
+
+    return ap_pass_brigade(f->next, bb);
 }
 
 static int redirectionio_log_handler(request_rec *r) {

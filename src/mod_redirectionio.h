@@ -40,9 +40,11 @@ typedef struct {
 } redirectionio_connection;
 
 typedef struct {
-    char                        *matched_rule_id;
-    char                        *target;
-    int                         status;
+    char    *matched_rule_id;
+    char    *target;
+    int     status;
+    int     match_on_response_status;
+    int     is_redirected;
 } redirectionio_context;
 
 #endif
