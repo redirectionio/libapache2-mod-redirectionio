@@ -17,7 +17,7 @@
 #define UNIX 0
 #define TCP 1
 
-#define RIO_TIMEOUT 10000 // Timeout in microseconds
+#define RIO_TIMEOUT 100000 // Timeout in microseconds
 #define RIO_RECONNECT_INTERVAL 0
 #define RIO_MIN_CONNECTIONS 1
 #define RIO_KEEP_CONNECTIONS 10
@@ -40,11 +40,14 @@ typedef struct {
 } redirectionio_connection;
 
 typedef struct {
-    char    *matched_rule_id;
-    char    *target;
-    int     status;
-    int     match_on_response_status;
-    int     is_redirected;
+    char                        *matched_rule_id;
+    char                        *target;
+    int                         status;
+    int                         match_on_response_status;
+    int                         is_redirected;
+    int                         should_filter_headers;
+    int                         should_filter_body;
+    redirectionio_connection    *body_filter_conn;
 } redirectionio_context;
 
 #endif

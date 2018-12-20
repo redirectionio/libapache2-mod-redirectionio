@@ -14,11 +14,14 @@ static char errbuf[1024];
 static void redirectionio_register_hooks(apr_pool_t *p);
 
 static void ap_headers_insert_output_filter(request_rec *r);
+static void ap_headers_insert_content_filters(request_rec *r, redirectionio_context *ctx);
 
 static int redirectionio_redirect_handler(request_rec *r);
 static int redirectionio_log_handler(request_rec *r);
 
 static apr_status_t redirectionio_filter_match_on_response(ap_filter_t *f, apr_bucket_brigade *b);
+static apr_status_t redirectionio_filter_header_filtering(ap_filter_t *f, apr_bucket_brigade *b);
+static apr_status_t redirectionio_filter_body_filtering(ap_filter_t *f, apr_bucket_brigade *b);
 
 static apr_status_t redirectionio_create_connection(redirectionio_connection *conn, redirectionio_config *config, apr_pool_t *pool);
 static redirectionio_connection* redirectionio_acquire_connection(redirectionio_config *config, apr_pool_t *pool);
@@ -62,6 +65,8 @@ static void redirectionio_register_hooks(apr_pool_t *p) {
     ap_hook_insert_filter(ap_headers_insert_output_filter, NULL, NULL, APR_HOOK_LAST);
     ap_hook_insert_error_filter(ap_headers_insert_output_filter, NULL, NULL, APR_HOOK_LAST);
     ap_register_output_filter("redirectionio_redirect_filter", redirectionio_filter_match_on_response, NULL, AP_FTYPE_CONTENT_SET);
+    ap_register_output_filter("redirectionio_header_filter", redirectionio_filter_header_filtering, NULL, AP_FTYPE_CONTENT_SET);
+    ap_register_output_filter("redirectionio_body_filter", redirectionio_filter_body_filtering, NULL, AP_FTYPE_CONTENT_SET);
 }
 
 static void ap_headers_insert_output_filter(request_rec *r) {
@@ -72,15 +77,34 @@ static void ap_headers_insert_output_filter(request_rec *r) {
         return;
     }
 
-    if (ctx == NULL || ctx->status == 0 || ctx->match_on_response_status == 0 || ctx->is_redirected) {
+    if (ctx == NULL) {
+        return;
+    }
+
+    if (ctx->status == 0 || ctx->match_on_response_status == 0 || ctx->is_redirected) {
+        ap_headers_insert_content_filters(r, ctx);
+
         return;
     }
 
     if (r->status != ctx->match_on_response_status) {
+        ap_headers_insert_content_filters(r, ctx);
+
         return;
     }
 
     ap_add_output_filter("redirectionio_redirect_filter", ctx, r, r->connection);
+    ap_headers_insert_content_filters(r, ctx);
+}
+
+static void ap_headers_insert_content_filters(request_rec *r, redirectionio_context *ctx) {
+    if (ctx->should_filter_headers == 1) {
+        ap_add_output_filter("redirectionio_header_filter", ctx, r, r->connection);
+    }
+
+    if (ctx->should_filter_body == 1) {
+        ap_add_output_filter("redirectionio_body_filter", ctx, r, r->connection);
+    }
 }
 
 static int redirectionio_redirect_handler(request_rec *r) {
@@ -94,7 +118,7 @@ static int redirectionio_redirect_handler(request_rec *r) {
     redirectionio_context* context = apr_palloc(r->pool, sizeof(redirectionio_context));
 
     if (context == NULL) {
-        ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, "Cannot create redirectionio context");
+        ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, "mod_redirectionio: cannot create context, skipping module");
 
         return DECLINED;
     }
@@ -102,6 +126,7 @@ static int redirectionio_redirect_handler(request_rec *r) {
     context->status = 0;
     context->match_on_response_status = 0;
     context->is_redirected = 0;
+    context->body_filter_conn = NULL;
 
     ap_set_module_config(r->request_config, &redirectionio_module, context);
     redirectionio_connection* conn = redirectionio_acquire_connection(config, r->pool);
@@ -152,6 +177,166 @@ static apr_status_t redirectionio_filter_match_on_response(ap_filter_t *f, apr_b
     ap_remove_output_filter(f);
 
     return ap_pass_brigade(f->next, bb);
+}
+
+static apr_status_t redirectionio_filter_header_filtering(ap_filter_t *f, apr_bucket_brigade *bb) {
+    redirectionio_context   *ctx = (redirectionio_context *)f->ctx;
+    redirectionio_config    *config = (redirectionio_config*) ap_get_module_config(f->r->per_dir_config, &redirectionio_module);
+
+    ap_remove_output_filter(f);
+
+    // Get connection
+    redirectionio_connection* conn = redirectionio_acquire_connection(config, f->r->pool);
+
+    if (conn == NULL) {
+        return DECLINED;
+    }
+
+    // Send headers
+    if (redirectionio_protocol_send_filter_headers(conn, ctx, f->r, config->project_key) != APR_SUCCESS) {
+        redirectionio_invalidate_connection(conn, config, f->r->pool);
+
+        return DECLINED;
+    }
+
+    redirectionio_release_connection(conn, config, f->r->pool);
+
+    return ap_pass_brigade(f->next, bb);
+}
+
+static apr_status_t redirectionio_filter_body_filtering(ap_filter_t *f, apr_bucket_brigade *bb) {
+    redirectionio_context   *ctx = (redirectionio_context *)f->ctx;
+    redirectionio_config    *config = (redirectionio_config*) ap_get_module_config(f->r->per_dir_config, &redirectionio_module);
+    apr_bucket              *b, *b_new;
+    apr_bucket_brigade      *bb_new;
+    const char              *input, *output;
+    uint64_t                input_size, output_size;
+    apr_status_t            rv;
+
+    // If first -> remove content_length, get_connection, init filtering command
+    if (ctx->body_filter_conn == NULL) {
+        ctx->body_filter_conn = redirectionio_acquire_connection(config, f->r->pool);
+
+        if (ctx->body_filter_conn == NULL) {
+            ap_remove_output_filter(f);
+
+            return ap_pass_brigade(f->next, bb);
+        }
+
+        if (redirectionio_protocol_send_filter_body_init(ctx->body_filter_conn, ctx, f->r, config->project_key) != APR_SUCCESS) {
+            redirectionio_invalidate_connection(ctx->body_filter_conn, config, f->r->pool);
+            ap_remove_output_filter(f);
+
+            return ap_pass_brigade(f->next, bb);
+        }
+
+        // Force chunked encoding
+        apr_table_unset(f->r->headers_out, "Content-Length");
+    }
+
+    if (APR_BRIGADE_EMPTY(bb)) {
+        return APR_SUCCESS;
+    }
+
+    bb_new = apr_brigade_create(f->r->pool, f->c->bucket_alloc);
+    b = APR_BRIGADE_FIRST(bb);
+
+    // filter brigade
+    while (b != APR_BRIGADE_SENTINEL(bb)) {
+        // Read bucket
+        rv = apr_bucket_read(b, &input, &input_size, APR_BLOCK_READ);
+
+        if (rv != APR_SUCCESS) {
+            redirectionio_invalidate_connection(ctx->body_filter_conn, config, f->r->pool);
+            ap_remove_output_filter(f);
+
+            return ap_pass_brigade(f->next, bb);
+        }
+
+        // Send bucket
+        if (input_size > 0) {
+            rv = redirectionio_protocol_send_filter_body_chunk(ctx->body_filter_conn, input, input_size, &output, &output_size, f->r->pool);
+
+            if (rv != APR_SUCCESS) {
+                redirectionio_invalidate_connection(ctx->body_filter_conn, config, f->r->pool);
+                ap_remove_output_filter(f);
+
+                return ap_pass_brigade(f->next, bb);
+            }
+
+            // Create a new one
+            if (output_size > 0) {
+                b_new = apr_bucket_transient_create(output, output_size, f->r->connection->bucket_alloc);
+
+                if (b_new == NULL) {
+                    redirectionio_invalidate_connection(ctx->body_filter_conn, config, f->r->pool);
+                    ap_remove_output_filter(f);
+
+                    return ap_pass_brigade(f->next, bb);
+                }
+
+                // Append it to the new brigade
+                APR_BRIGADE_INSERT_TAIL(bb_new, b_new);
+            }
+        }
+
+
+        if (APR_BUCKET_IS_EOS(b)) {
+            // Send termination to the connection and wait for it to return us the last data
+            rv = redirectionio_protocol_send_filter_body_finish(ctx->body_filter_conn, &output, &output_size, f->r->pool);
+
+            if (rv != APR_SUCCESS) {
+                redirectionio_invalidate_connection(ctx->body_filter_conn, config, f->r->pool);
+                ap_remove_output_filter(f);
+
+                return ap_pass_brigade(f->next, bb);
+            }
+
+            if (output_size > 0) {
+                // Create a new one
+                b_new = apr_bucket_transient_create(output, output_size, f->r->connection->bucket_alloc);
+
+                if (b_new == NULL) {
+                    redirectionio_invalidate_connection(ctx->body_filter_conn, config, f->r->pool);
+                    ap_remove_output_filter(f);
+
+                    return ap_pass_brigade(f->next, bb);
+                }
+
+                // Append it to the new brigade
+                APR_BRIGADE_INSERT_TAIL(bb_new, b_new);
+            }
+
+            // Create also an eos bucket and append it to the brigade
+            b_new = apr_bucket_eos_create(f->r->connection->bucket_alloc);
+
+            if (b_new == NULL) {
+                redirectionio_invalidate_connection(ctx->body_filter_conn, config, f->r->pool);
+                ap_remove_output_filter(f);
+
+                return ap_pass_brigade(f->next, bb);
+            }
+
+            APR_BRIGADE_INSERT_TAIL(bb_new, b_new);
+
+            // Release connection
+            redirectionio_release_connection(ctx->body_filter_conn, config, f->r->pool);
+
+            // Remove filter
+            ap_remove_output_filter(f);
+
+            // Break
+            break;
+        }
+
+        b = APR_BUCKET_NEXT(b);
+    }
+
+    // Clear old brigade and buckets
+    apr_brigade_destroy(bb);
+
+    // Pass new brigade and buckets to the next filter
+    return ap_pass_brigade(f->next, bb_new);
 }
 
 static int redirectionio_log_handler(request_rec *r) {
