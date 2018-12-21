@@ -210,7 +210,7 @@ static apr_status_t redirectionio_filter_body_filtering(ap_filter_t *f, apr_buck
     apr_bucket              *b, *b_new;
     apr_bucket_brigade      *bb_new;
     const char              *input, *output;
-    uint64_t                input_size, output_size;
+    int64_t                 input_size, output_size;
     apr_status_t            rv;
 
     // If first -> remove content_length, get_connection, init filtering command
@@ -244,7 +244,7 @@ static apr_status_t redirectionio_filter_body_filtering(ap_filter_t *f, apr_buck
     // filter brigade
     while (b != APR_BRIGADE_SENTINEL(bb)) {
         // Read bucket
-        rv = apr_bucket_read(b, &input, &input_size, APR_BLOCK_READ);
+        rv = apr_bucket_read(b, &input, (apr_size_t *)&input_size, APR_BLOCK_READ);
 
         if (rv != APR_SUCCESS) {
             redirectionio_invalidate_connection(ctx->body_filter_conn, config, f->r->pool);
@@ -279,7 +279,6 @@ static apr_status_t redirectionio_filter_body_filtering(ap_filter_t *f, apr_buck
                 APR_BRIGADE_INSERT_TAIL(bb_new, b_new);
             }
         }
-
 
         if (APR_BUCKET_IS_EOS(b)) {
             // Send termination to the connection and wait for it to return us the last data

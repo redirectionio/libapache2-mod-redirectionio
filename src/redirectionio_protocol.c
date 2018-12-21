@@ -279,7 +279,7 @@ apr_status_t redirectionio_protocol_send_filter_body_init(redirectionio_connecti
     return APR_SUCCESS;
 }
 
-apr_status_t redirectionio_protocol_send_filter_body_chunk(redirectionio_connection *conn, const char *input, uint64_t input_size, const char **output, uint64_t *output_size, apr_pool_t *pool) {
+apr_status_t redirectionio_protocol_send_filter_body_chunk(redirectionio_connection *conn, const char *input, uint64_t input_size, const char **output, int64_t *output_size, apr_pool_t *pool) {
     apr_size_t      llen;
     apr_status_t    rv;
     uint64_t        length;
@@ -313,8 +313,13 @@ apr_status_t redirectionio_protocol_send_filter_body_chunk(redirectionio_connect
     }
 
     *output_size = ntohll(*output_size);
+
+    if (*output_size <= 0) {
+        return APR_SUCCESS;
+    }
+
     *output = (const char *) apr_palloc(pool, *output_size);
-    rv = apr_socket_recv(conn->rio_sock, (char *)*output, output_size);
+    rv = apr_socket_recv(conn->rio_sock, (char *)*output, (apr_size_t *)output_size);
 
     if (rv != APR_SUCCESS) {
         ap_log_error(APLOG_MARK, APLOG_ERR, 0, NULL, "mod_redirectionio: Error receiving filter body chunk data: %s", apr_strerror(rv, errbuf, sizeof(errbuf)));
@@ -325,14 +330,14 @@ apr_status_t redirectionio_protocol_send_filter_body_chunk(redirectionio_connect
     return APR_SUCCESS;
 }
 
-apr_status_t redirectionio_protocol_send_filter_body_finish(redirectionio_connection *conn, const char **output, uint64_t *output_size, apr_pool_t *pool) {
+apr_status_t redirectionio_protocol_send_filter_body_finish(redirectionio_connection *conn, const char **output, int64_t *output_size, apr_pool_t *pool) {
     apr_size_t      llen;
     apr_status_t    rv;
-    uint64_t        length, dummy;
+    int64_t         length, dummy;
 
     // Send buffer
-    llen = sizeof(uint64_t);
-    length = 0;
+    llen = sizeof(int64_t);
+    length = -1;
     rv = apr_socket_send(conn->rio_sock, (const char *)&length, &llen);
 
     if (rv != APR_SUCCESS) {
@@ -352,17 +357,19 @@ apr_status_t redirectionio_protocol_send_filter_body_finish(redirectionio_connec
 
     *output_size = ntohll(*output_size);
 
-    if (*output_size == 0) {
+    if (*output_size < 0) {
         return APR_SUCCESS;
     }
 
-    *output = (const char *) apr_palloc(pool, *output_size);
-    rv = apr_socket_recv(conn->rio_sock, (char *)*output, output_size);
+    if (*output_size > 0) {
+        *output = (const char *) apr_palloc(pool, *output_size);
+        rv = apr_socket_recv(conn->rio_sock, (char *)*output, (apr_size_t *)output_size);
 
-    if (rv != APR_SUCCESS) {
-        ap_log_error(APLOG_MARK, APLOG_ERR, 0, NULL, "mod_redirectionio: Error receiving filter body chunk data: %s", apr_strerror(rv, errbuf, sizeof(errbuf)));
+        if (rv != APR_SUCCESS) {
+            ap_log_error(APLOG_MARK, APLOG_ERR, 0, NULL, "mod_redirectionio: Error receiving filter body chunk data: %s", apr_strerror(rv, errbuf, sizeof(errbuf)));
 
-        return rv;
+            return rv;
+        }
     }
 
     apr_socket_recv(conn->rio_sock, (char *)&dummy, &llen);
