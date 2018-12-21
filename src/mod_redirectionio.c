@@ -189,14 +189,14 @@ static apr_status_t redirectionio_filter_header_filtering(ap_filter_t *f, apr_bu
     redirectionio_connection* conn = redirectionio_acquire_connection(config, f->r->pool);
 
     if (conn == NULL) {
-        return DECLINED;
+        return ap_pass_brigade(f->next, bb);;
     }
 
     // Send headers
     if (redirectionio_protocol_send_filter_headers(conn, ctx, f->r, config->project_key) != APR_SUCCESS) {
         redirectionio_invalidate_connection(conn, config, f->r->pool);
 
-        return DECLINED;
+        return ap_pass_brigade(f->next, bb);;
     }
 
     redirectionio_release_connection(conn, config, f->r->pool);

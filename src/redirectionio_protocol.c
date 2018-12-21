@@ -193,6 +193,7 @@ apr_status_t redirectionio_protocol_send_filter_headers(redirectionio_connection
     }
 
     dst = cJSON_PrintUnformatted(query);
+    cJSON_Delete(query);
 
     clen = sizeof(COMMAND_FILTER_HEADER_NAME);
     rv = apr_socket_send(conn->rio_sock, COMMAND_FILTER_HEADER_NAME, &clen);
@@ -205,6 +206,7 @@ apr_status_t redirectionio_protocol_send_filter_headers(redirectionio_connection
 
     wlen = strlen(dst) + 1;
     rv = apr_socket_send(conn->rio_sock, dst, &wlen);
+    free((void *)dst);
 
     if (rv != APR_SUCCESS) {
         ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, "mod_redirectionio: Error sending filter headers command data: %s", apr_strerror(rv, errbuf, sizeof(errbuf)));
