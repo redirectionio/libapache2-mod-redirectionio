@@ -225,7 +225,7 @@ apr_status_t redirectionio_protocol_send_filter_headers(redirectionio_connection
     headers = cJSON_GetObjectItem(result, "headers");
 
     if (headers == NULL || headers->type != cJSON_Array) {
-        ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, "mod_redirectionio: No headers present int json result");
+        ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, "mod_redirectionio: No header present in json result");
 
         return APR_EINCOMPLETE;
     }
