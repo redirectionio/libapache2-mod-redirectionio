@@ -2,6 +2,7 @@
 #include "http_config.h"
 #include "http_log.h"
 #include "http_protocol.h"
+#include "http_request.h"
 #include "ap_config.h"
 #include "apr_network_io.h"
 #include "apr_strings.h"
@@ -14,8 +15,8 @@ static char errbuf[1024];
 static void redirectionio_register_hooks(apr_pool_t *p);
 
 static void ap_headers_insert_output_filter(request_rec *r);
-static void ap_headers_insert_content_filters(request_rec *r, redirectionio_context *ctx);
 
+static int redirectionio_match_handler(request_rec *r);
 static int redirectionio_redirect_handler(request_rec *r);
 static int redirectionio_log_handler(request_rec *r);
 
@@ -59,6 +60,8 @@ module AP_MODULE_DECLARE_DATA redirectionio_module = {
 };
 
 static void redirectionio_register_hooks(apr_pool_t *p) {
+    ap_hook_type_checker(redirectionio_match_handler, NULL, NULL, APR_HOOK_LAST);
+
     ap_hook_handler(redirectionio_redirect_handler, NULL, NULL, APR_HOOK_FIRST);
     ap_hook_log_transaction(redirectionio_log_handler, NULL, NULL, APR_HOOK_MIDDLE);
 
@@ -67,6 +70,54 @@ static void redirectionio_register_hooks(apr_pool_t *p) {
     ap_register_output_filter("redirectionio_redirect_filter", redirectionio_filter_match_on_response, NULL, AP_FTYPE_CONTENT_SET);
     ap_register_output_filter("redirectionio_header_filter", redirectionio_filter_header_filtering, NULL, AP_FTYPE_CONTENT_SET);
     ap_register_output_filter("redirectionio_body_filter", redirectionio_filter_body_filtering, NULL, AP_FTYPE_CONTENT_SET);
+}
+
+static int redirectionio_match_handler(request_rec *r) {
+    redirectionio_config *config = (redirectionio_config*) ap_get_module_config(r->per_dir_config, &redirectionio_module);
+
+    if (config->enable != 1) {
+        return DECLINED;
+    }
+
+    // Create context
+    redirectionio_context   *ctx = ap_get_module_config(r->request_config, &redirectionio_module);
+
+    if (ctx != NULL) {
+        return DECLINED;
+    }
+
+    ctx = apr_palloc(r->pool, sizeof(redirectionio_context));
+
+    if (ctx == NULL) {
+        ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, "mod_redirectionio: cannot create context, skipping module");
+
+        return DECLINED;
+    }
+
+    ctx->status = 0;
+    ctx->match_on_response_status = 0;
+    ctx->is_redirected = 0;
+    ctx->should_filter_body = 0;
+    ctx->should_filter_headers = 0;
+    ctx->body_filter_conn = NULL;
+
+    ap_set_module_config(r->request_config, &redirectionio_module, ctx);
+    redirectionio_connection* conn = redirectionio_acquire_connection(config, r->pool);
+
+    if (conn == NULL) {
+        return DECLINED;
+    }
+
+    // Ask for redirection
+    if (redirectionio_protocol_match(conn, ctx, r, config->project_key) != APR_SUCCESS) {
+        redirectionio_invalidate_connection(conn, config, r->pool);
+
+        return DECLINED;
+    }
+
+    redirectionio_release_connection(conn, config, r->pool);
+
+    return APR_SUCCESS;
 }
 
 static void ap_headers_insert_output_filter(request_rec *r) {
@@ -81,23 +132,10 @@ static void ap_headers_insert_output_filter(request_rec *r) {
         return;
     }
 
-    if (ctx->status == 0 || ctx->match_on_response_status == 0 || ctx->is_redirected) {
-        ap_headers_insert_content_filters(r, ctx);
-
-        return;
+    if (ctx->status != 0 && ctx->match_on_response_status != 0 && !ctx->is_redirected && r->status == ctx->match_on_response_status) {
+        ap_add_output_filter("redirectionio_redirect_filter", ctx, r, r->connection);
     }
 
-    if (r->status != ctx->match_on_response_status) {
-        ap_headers_insert_content_filters(r, ctx);
-
-        return;
-    }
-
-    ap_add_output_filter("redirectionio_redirect_filter", ctx, r, r->connection);
-    ap_headers_insert_content_filters(r, ctx);
-}
-
-static void ap_headers_insert_content_filters(request_rec *r, redirectionio_context *ctx) {
     if (ctx->should_filter_headers == 1) {
         ap_add_output_filter("redirectionio_header_filter", ctx, r, r->connection);
     }
@@ -108,59 +146,32 @@ static void ap_headers_insert_content_filters(request_rec *r, redirectionio_cont
 }
 
 static int redirectionio_redirect_handler(request_rec *r) {
-    redirectionio_config *config = (redirectionio_config*) ap_get_module_config(r->per_dir_config, &redirectionio_module);
+    redirectionio_config    *config = (redirectionio_config*) ap_get_module_config(r->per_dir_config, &redirectionio_module);
 
+    // Not enabled
     if (config->enable != 1) {
         return DECLINED;
     }
 
-    // Create context
-    redirectionio_context* context = apr_palloc(r->pool, sizeof(redirectionio_context));
-
-    if (context == NULL) {
-        ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, "mod_redirectionio: cannot create context, skipping module");
-
-        return DECLINED;
-    }
-
-    context->status = 0;
-    context->match_on_response_status = 0;
-    context->is_redirected = 0;
-    context->body_filter_conn = NULL;
-
-    ap_set_module_config(r->request_config, &redirectionio_module, context);
-    redirectionio_connection* conn = redirectionio_acquire_connection(config, r->pool);
-
-    if (conn == NULL) {
-        return DECLINED;
-    }
-
-    // Ask for redirection
-    if (redirectionio_protocol_match(conn, context, r, config->project_key) != APR_SUCCESS) {
-        redirectionio_invalidate_connection(conn, config, r->pool);
-
-        return DECLINED;
-    }
-
-    redirectionio_release_connection(conn, config, r->pool);
+    redirectionio_context   *ctx = ap_get_module_config(r->request_config, &redirectionio_module);
 
     // No match here
-    if (context->status == 0) {
+    if (ctx->status == 0 || ctx->is_redirected == 1) {
         return DECLINED;
     }
 
-    if (context->match_on_response_status > 0) {
+    if (ctx->match_on_response_status > 0) {
         return DECLINED;
     }
 
-    if (context->status != 410) {
-        apr_table_setn(r->headers_out, "Location", context->target);
+    if (ctx->status != 410) {
+        apr_table_setn(r->headers_out, "Location", ctx->target);
     }
 
-    r->status = context->status;
-    context->is_redirected = 1;
+    r->status = ctx->status;
+    ctx->is_redirected = 1;
 
-    return context->status;
+    return ctx->status;
 }
 
 static apr_status_t redirectionio_filter_match_on_response(ap_filter_t *f, apr_bucket_brigade *bb) {
