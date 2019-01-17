@@ -60,13 +60,15 @@ module AP_MODULE_DECLARE_DATA redirectionio_module = {
 };
 
 static void redirectionio_register_hooks(apr_pool_t *p) {
-    ap_hook_type_checker(redirectionio_match_handler, NULL, NULL, APR_HOOK_LAST);
+    ap_hook_type_checker(redirectionio_match_handler, NULL, NULL, APR_HOOK_FIRST);
+    ap_hook_fixups(redirectionio_match_handler, NULL, NULL, APR_HOOK_FIRST);
 
     ap_hook_handler(redirectionio_redirect_handler, NULL, NULL, APR_HOOK_FIRST);
     ap_hook_log_transaction(redirectionio_log_handler, NULL, NULL, APR_HOOK_MIDDLE);
 
     ap_hook_insert_filter(ap_headers_insert_output_filter, NULL, NULL, APR_HOOK_LAST);
     ap_hook_insert_error_filter(ap_headers_insert_output_filter, NULL, NULL, APR_HOOK_LAST);
+
     ap_register_output_filter("redirectionio_redirect_filter", redirectionio_filter_match_on_response, NULL, AP_FTYPE_CONTENT_SET);
     ap_register_output_filter("redirectionio_header_filter", redirectionio_filter_header_filtering, NULL, AP_FTYPE_CONTENT_SET);
     ap_register_output_filter("redirectionio_body_filter", redirectionio_filter_body_filtering, NULL, AP_FTYPE_CONTENT_SET);
@@ -117,7 +119,7 @@ static int redirectionio_match_handler(request_rec *r) {
 
     redirectionio_release_connection(conn, config, r->pool);
 
-    return APR_SUCCESS;
+    return DECLINED;
 }
 
 static void ap_headers_insert_output_filter(request_rec *r) {
@@ -132,17 +134,9 @@ static void ap_headers_insert_output_filter(request_rec *r) {
         return;
     }
 
-    if (ctx->status != 0 && ctx->match_on_response_status != 0 && !ctx->is_redirected && r->status == ctx->match_on_response_status) {
-        ap_add_output_filter("redirectionio_redirect_filter", ctx, r, r->connection);
-    }
-
-    if (ctx->should_filter_headers == 1) {
-        ap_add_output_filter("redirectionio_header_filter", ctx, r, r->connection);
-    }
-
-    if (ctx->should_filter_body == 1) {
-        ap_add_output_filter("redirectionio_body_filter", ctx, r, r->connection);
-    }
+    ap_add_output_filter("redirectionio_redirect_filter", ctx, r, r->connection);
+    ap_add_output_filter("redirectionio_header_filter", ctx, r, r->connection);
+    ap_add_output_filter("redirectionio_body_filter", ctx, r, r->connection);
 }
 
 static int redirectionio_redirect_handler(request_rec *r) {
@@ -154,6 +148,10 @@ static int redirectionio_redirect_handler(request_rec *r) {
     }
 
     redirectionio_context   *ctx = ap_get_module_config(r->request_config, &redirectionio_module);
+
+    if (ctx == NULL) {
+        return DECLINED;
+    }
 
     // No match here
     if (ctx->status == 0 || ctx->is_redirected == 1) {
@@ -177,6 +175,14 @@ static int redirectionio_redirect_handler(request_rec *r) {
 static apr_status_t redirectionio_filter_match_on_response(ap_filter_t *f, apr_bucket_brigade *bb) {
     redirectionio_context   *ctx = (redirectionio_context *)f->ctx;
 
+    if (ctx == NULL) {
+        return ap_pass_brigade(f->next, bb);
+    }
+
+    if (ctx->is_redirected || ctx->status == 0 || (ctx->match_on_response_status > 0 && ctx->match_on_response_status != f->r->status)) {
+        return ap_pass_brigade(f->next, bb);
+    }
+
     if (ctx->status != 410) {
         apr_table_setn(f->r->headers_out, "Location", ctx->target);
     }
@@ -194,20 +200,28 @@ static apr_status_t redirectionio_filter_header_filtering(ap_filter_t *f, apr_bu
     redirectionio_context   *ctx = (redirectionio_context *)f->ctx;
     redirectionio_config    *config = (redirectionio_config*) ap_get_module_config(f->r->per_dir_config, &redirectionio_module);
 
+    if (ctx == NULL) {
+        return ap_pass_brigade(f->next, bb);
+    }
+
+    if (ctx->should_filter_headers == 0 || (ctx->is_redirected != 1 && ctx->match_on_response_status > 0 && ctx->match_on_response_status != f->r->status)) {
+        return ap_pass_brigade(f->next, bb);
+    }
+
     ap_remove_output_filter(f);
 
     // Get connection
     redirectionio_connection* conn = redirectionio_acquire_connection(config, f->r->pool);
 
     if (conn == NULL) {
-        return ap_pass_brigade(f->next, bb);;
+        return ap_pass_brigade(f->next, bb);
     }
 
     // Send headers
     if (redirectionio_protocol_send_filter_headers(conn, ctx, f->r, config->project_key) != APR_SUCCESS) {
         redirectionio_invalidate_connection(conn, config, f->r->pool);
 
-        return ap_pass_brigade(f->next, bb);;
+        return ap_pass_brigade(f->next, bb);
     }
 
     redirectionio_release_connection(conn, config, f->r->pool);
@@ -223,6 +237,14 @@ static apr_status_t redirectionio_filter_body_filtering(ap_filter_t *f, apr_buck
     const char              *input, *output;
     int64_t                 input_size, output_size;
     apr_status_t            rv;
+
+    if (ctx == NULL) {
+        return ap_pass_brigade(f->next, bb);
+    }
+
+    if (ctx->should_filter_body == 0 || (ctx->is_redirected != 1 && ctx->match_on_response_status > 0 && ctx->match_on_response_status != f->r->status)) {
+        return ap_pass_brigade(f->next, bb);
+    }
 
     // If first -> remove content_length, get_connection, init filtering command
     if (ctx->body_filter_conn == NULL) {
