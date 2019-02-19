@@ -17,6 +17,13 @@
 #define UNIX 0
 #define TCP 1
 
+#ifndef PROXY_VERSION
+#define PROXY_VERSION libapache2-mod-redirectionio:dev
+#endif
+
+#define STRINGIZE(x) #x
+#define PROXY_VERSION_STR(x) STRINGIZE(x)
+
 #define RIO_TIMEOUT 100000 // Timeout in microseconds
 #define RIO_RECONNECT_INTERVAL 0
 #define RIO_MIN_CONNECTIONS 1

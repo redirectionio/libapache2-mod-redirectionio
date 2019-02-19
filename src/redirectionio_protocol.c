@@ -11,7 +11,7 @@ static char errbuf[1024];
 const char COMMAND_MATCH_NAME[] = "MATCH_WITH_RESPONSE";
 const char COMMAND_MATCH_QUERY[] = "{ \"project_id\": \"%s\", \"request_uri\": \"%s\", \"host\": \"%s\" }";
 const char COMMAND_LOG_NAME[] = "LOG";
-const char COMMAND_LOG_QUERY[] = "{ \"project_id\": \"%s\", \"request_uri\": \"%s\", \"host\": \"%s\", \"rule_id\": \"%s\", \"target\": \"%s\", \"status_code\": %d, \"user_agent\": \"%s\", \"referer\": \"%s\", \"method\": \"%s\" }";
+const char COMMAND_LOG_QUERY[] = "{ \"project_id\": \"%s\", \"request_uri\": \"%s\", \"host\": \"%s\", \"rule_id\": \"%s\", \"target\": \"%s\", \"status_code\": %d, \"user_agent\": \"%s\", \"referer\": \"%s\", \"method\": \"%s\", \"proxy\": \"%s\" }";
 const char COMMAND_FILTER_HEADER_NAME[] = "FILTER_HEADER";
 const char COMMAND_FILTER_BODY_NAME[] = "FILTER_BODY";
 
@@ -130,7 +130,8 @@ apr_status_t redirectionio_protocol_log(redirectionio_connection *conn, redirect
         + strlen(user_agent)
         + strlen(referer)
         + strlen(r->method)
-        - 18 // 9 * 2 (%x) characters replaced with values
+        + strlen(PROXY_VERSION_STR(PROXY_VERSION))
+        - 20 // 10 * 2 (%x) characters replaced with values
     ;
 
     dst = (char *) apr_palloc(r->pool, wlen);
@@ -146,7 +147,8 @@ apr_status_t redirectionio_protocol_log(redirectionio_connection *conn, redirect
         r->status,
         user_agent,
         referer,
-        r->method
+        r->method,
+        PROXY_VERSION_STR(PROXY_VERSION)
     );
 
     clen = sizeof(COMMAND_LOG_NAME);
