@@ -31,6 +31,7 @@ typedef struct {
     int             protocol;
     int             enable;
     int             enable_logs;
+    int             pass_set;
     apr_reslist_t   *connection_pool;
 } redirectionio_config;
 

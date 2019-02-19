@@ -508,10 +508,11 @@ static void *create_redirectionio_dir_conf(apr_pool_t *pool, char *context) {
     if (config) {
         config->enable = -1;
         config->enable_logs = -1;
-        config->server = NULL;
         config->project_key = NULL;
-        config->protocol = -1;
-        config->port = -1;
+        config->protocol = TCP;
+        config->port = 10301;
+        config->server = "127.0.0.1";
+        config->pass_set = -1;
     }
 
     return config;
@@ -541,14 +542,16 @@ static void *merge_redirectionio_dir_conf(apr_pool_t *pool, void *parent, void *
         conf->project_key = conf_current->project_key;
     }
 
-    if (conf_current->server == NULL) {
+    if (conf_current->pass_set == -1) {
         conf->port = conf_parent->port;
         conf->protocol = conf_parent->protocol;
         conf->server = conf_parent->server;
+        conf->pass_set = conf_parent->pass_set;
     } else {
         conf->port = conf_current->port;
         conf->protocol = conf_current->protocol;
         conf->server = conf_current->server;
+        conf->pass_set = conf_current->pass_set;
     }
 
     if (apr_reslist_create(
@@ -685,6 +688,8 @@ static const char *redirectionio_set_pass(cmd_parms *cmd, void *cfg, const char 
 
         return NULL;
     }
+
+    conf->pass_set = 1;
 
     if (uri.scheme != NULL && apr_strnatcmp(uri.scheme, "unix") == 0) {
         conf->protocol = UNIX;
