@@ -40,6 +40,7 @@ typedef struct {
     int             enable_logs;
     int             pass_set;
     apr_reslist_t   *connection_pool;
+    apr_pool_t      *pool;
 } redirectionio_config;
 
 typedef struct {

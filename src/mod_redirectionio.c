@@ -81,6 +81,34 @@ static int redirectionio_match_handler(request_rec *r) {
         return DECLINED;
     }
 
+    // Do not match against internal redirect
+    if (r->prev) {
+        return DECLINED;
+    }
+
+    if (config->connection_pool == NULL) {
+        if (apr_reslist_create(
+            &config->connection_pool,
+            RIO_MIN_CONNECTIONS,
+            RIO_KEEP_CONNECTIONS,
+            RIO_MAX_CONNECTIONS,
+            0,
+            redirectionio_pool_construct,
+            redirectionio_pool_destruct,
+            config,
+            config->pool
+        ) != APR_SUCCESS) {
+            ap_log_rerror(APLOG_MARK, APLOG_CRIT, 0, r, "mod_redirectionio: Failed to initialize resource pool, disabling redirectionio.");
+
+            config->enable = 0;
+
+            return DECLINED;
+        }
+
+        apr_reslist_timeout_set(config->connection_pool, RIO_TIMEOUT);
+        apr_pool_cleanup_register(config->pool, config->connection_pool, redirectionio_child_exit, redirectionio_child_exit);
+    }
+
     // Create context
     redirectionio_context   *ctx = ap_get_module_config(r->request_config, &redirectionio_module);
 
@@ -96,6 +124,8 @@ static int redirectionio_match_handler(request_rec *r) {
         return DECLINED;
     }
 
+    ctx->matched_rule_id = NULL;
+    ctx->target = NULL;
     ctx->status = 0;
     ctx->match_on_response_status = 0;
     ctx->is_redirected = 0;
@@ -446,6 +476,14 @@ static apr_status_t redirectionio_create_connection(redirectionio_connection *co
         return rv;
     }
 
+    rv = apr_socket_opt_set(conn->rio_sock, APR_SO_KEEPALIVE, 1);
+
+    if (rv != APR_SUCCESS) {
+        ap_log_perror(APLOG_MARK, APLOG_ERR, 0, pool, "mod_redirectionio: Error setting socket keepalive: %s", apr_strerror(rv, errbuf, sizeof(errbuf)));
+
+        return rv;
+    }
+
     rv = apr_socket_opt_set(conn->rio_sock, APR_TCP_NODELAY, 1);
 
     if (rv != APR_SUCCESS) {
@@ -554,26 +592,8 @@ static void *merge_redirectionio_dir_conf(apr_pool_t *pool, void *parent, void *
         conf->pass_set = conf_current->pass_set;
     }
 
-    if (apr_reslist_create(
-        &conf->connection_pool,
-        RIO_MIN_CONNECTIONS,
-        RIO_KEEP_CONNECTIONS,
-        RIO_MAX_CONNECTIONS,
-        0,
-        redirectionio_pool_construct,
-        redirectionio_pool_destruct,
-        conf,
-        pool
-    ) != APR_SUCCESS) {
-        ap_log_perror(APLOG_MARK, APLOG_CRIT, 0, pool, "mod_redirectionio: Failed to initialize resource pool, disabling redirectionio.");
-
-        conf->enable = 0;
-
-        return conf;
-    }
-
-    apr_reslist_timeout_set(conf->connection_pool, RIO_TIMEOUT);
-    apr_pool_cleanup_register(pool, conf->connection_pool, redirectionio_child_exit, redirectionio_child_exit);
+    conf->pool = pool;
+    conf->connection_pool = NULL;
 
     return conf;
 }

@@ -96,12 +96,20 @@ apr_status_t redirectionio_protocol_match(redirectionio_connection *conn, redire
 
 apr_status_t redirectionio_protocol_log(redirectionio_connection *conn, redirectionio_context *ctx, request_rec *r, const char *project_key) {
     apr_size_t      wlen, clen;
-    const char      *location = apr_table_get(r->headers_out, "Location");
+    const char      *location;
     const char      *user_agent = apr_table_get(r->headers_in, "User-Agent");
     const char      *referer = apr_table_get(r->headers_in, "Referer");
     const char      *matched_rule_id = ctx->matched_rule_id;
     apr_status_t    rv;
     char            *dst;
+    request_rec     *response = r;
+
+    // Only trust last response for data
+    while (response->next) {
+        response = response->next;
+    }
+
+    location = apr_table_get(response->headers_out, "Location");
 
     if (location == NULL) {
         location = "";
@@ -144,7 +152,7 @@ apr_status_t redirectionio_protocol_log(redirectionio_connection *conn, redirect
         r->hostname,
         matched_rule_id,
         location,
-        r->status,
+        response->status,
         user_agent,
         referer,
         r->method,
