@@ -8,21 +8,19 @@
 
 static char errbuf[1024];
 
-const char COMMAND_MATCH_NAME[] = "MATCH_WITH_RESPONSE";
+const char COMMAND_MATCH_NAME[] = "MATCH_RULE";
 const char COMMAND_MATCH_QUERY[] = "{ \"project_id\": \"%s\", \"request_uri\": \"%s\", \"host\": \"%s\" }";
 const char COMMAND_LOG_NAME[] = "LOG";
 const char COMMAND_LOG_QUERY[] = "{ \"project_id\": \"%s\", \"request_uri\": \"%s\", \"host\": \"%s\", \"rule_id\": \"%s\", \"target\": \"%s\", \"status_code\": %d, \"user_agent\": \"%s\", \"referer\": \"%s\", \"method\": \"%s\", \"proxy\": \"%s\" }";
-const char COMMAND_FILTER_HEADER_NAME[] = "FILTER_HEADER";
-const char COMMAND_FILTER_BODY_NAME[] = "FILTER_BODY";
 
-static apr_status_t redirectionio_read_json_handler(redirectionio_connection *conn, apr_pool_t *pool, cJSON **json);
-static apr_status_t redirectionio_write_string(redirectionio_connection *conn, const char* data);
+static apr_status_t redirectionio_read_json_handler(redirectionio_connection *conn, apr_pool_t *pool, cJSON **json, char **json_str);
 
 apr_status_t redirectionio_protocol_match(redirectionio_connection *conn, redirectionio_context *ctx, request_rec *r, const char *project_key) {
     apr_size_t      wlen, clen;
     char            *dst;
     apr_status_t    rv;
     cJSON           *result;
+    char            *result_str;
 
     wlen = sizeof(COMMAND_MATCH_QUERY) + strlen(project_key) + strlen(r->unparsed_uri) + strlen(r->hostname) - 6;
     dst = (char *) apr_palloc(r->pool, wlen);
@@ -45,7 +43,7 @@ apr_status_t redirectionio_protocol_match(redirectionio_connection *conn, redire
         return rv;
     }
 
-    rv = redirectionio_read_json_handler(conn, r->pool, &result);
+    rv = redirectionio_read_json_handler(conn, r->pool, &result, &result_str);
 
     if (rv != APR_SUCCESS) {
         ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, "mod_redirectionio: Error receiving match command result: %s", apr_strerror(rv, errbuf, sizeof(errbuf)));
@@ -53,43 +51,8 @@ apr_status_t redirectionio_protocol_match(redirectionio_connection *conn, redire
         return rv;
     }
 
-    ctx->should_filter_body = 0;
-    ctx->should_filter_headers = 0;
-    ctx->matched_rule_id = "";
-    ctx->status = 0;
-    ctx->match_on_response_status = 0;
-
-    cJSON *status = cJSON_GetObjectItem(result, "status_code");
-    cJSON *match_on_response_status = cJSON_GetObjectItem(result, "match_on_response_status");
-    cJSON *location = cJSON_GetObjectItem(result, "location");
-    cJSON *matched_rule = cJSON_GetObjectItem(result, "matched_rule");
-    cJSON *should_filter_headers = cJSON_GetObjectItem(result, "should_filter_headers");
-    cJSON *should_filter_body = cJSON_GetObjectItem(result, "should_filter_body");
-    cJSON *rule_id = NULL;
-
-    if (matched_rule != NULL && matched_rule->type != cJSON_NULL) {
-        rule_id = cJSON_GetObjectItem(matched_rule, "id");
-    }
-
-    if (matched_rule == NULL || matched_rule->type == cJSON_NULL) {
-        return APR_SUCCESS;
-    }
-
-    ctx->matched_rule_id = rule_id->valuestring;
-    ctx->target = location->valuestring;
-    ctx->status = status->valueint;
-
-    if (match_on_response_status != NULL && match_on_response_status->type != cJSON_NULL) {
-        ctx->match_on_response_status = match_on_response_status->valueint;
-    }
-
-    if (should_filter_headers != NULL && should_filter_headers->type == cJSON_True) {
-        ctx->should_filter_headers = 1;
-    }
-
-    if (should_filter_body != NULL && should_filter_body->type == cJSON_True) {
-        ctx->should_filter_body = 1;
-    }
+    ctx->matched_rule_str = result_str;
+    ctx->matched_rule = result;
 
     return APR_SUCCESS;
 }
@@ -99,7 +62,8 @@ apr_status_t redirectionio_protocol_log(redirectionio_connection *conn, redirect
     const char      *location;
     const char      *user_agent = apr_table_get(r->headers_in, "User-Agent");
     const char      *referer = apr_table_get(r->headers_in, "Referer");
-    const char      *matched_rule_id = ctx->matched_rule_id;
+    cJSON           *matched_rule_id;
+    char            *rule_id_str = NULL;
     apr_status_t    rv;
     char            *dst;
     request_rec     *response = r;
@@ -123,8 +87,16 @@ apr_status_t redirectionio_protocol_log(redirectionio_connection *conn, redirect
         referer = "";
     }
 
-    if (matched_rule_id == NULL) {
-        matched_rule_id = "";
+    if (ctx->matched_rule != NULL) {
+        matched_rule_id = cJSON_GetObjectItem(ctx->matched_rule, "id");
+
+        if (matched_rule_id != NULL) {
+            rule_id_str = matched_rule_id->valuestring;
+        }
+    }
+
+    if (rule_id_str == NULL) {
+        rule_id_str = "";
     }
 
     wlen =
@@ -132,7 +104,7 @@ apr_status_t redirectionio_protocol_log(redirectionio_connection *conn, redirect
         + strlen(project_key)
         + strlen(r->unparsed_uri)
         + strlen(r->hostname)
-        + strlen(matched_rule_id)
+        + strlen(rule_id_str)
         + strlen(location)
         + 3 // Status code length
         + strlen(user_agent)
@@ -150,7 +122,7 @@ apr_status_t redirectionio_protocol_log(redirectionio_connection *conn, redirect
         project_key,
         r->unparsed_uri,
         r->hostname,
-        matched_rule_id,
+        rule_id_str,
         location,
         response->status,
         user_agent,
@@ -179,22 +151,14 @@ apr_status_t redirectionio_protocol_log(redirectionio_connection *conn, redirect
     return APR_SUCCESS;
 }
 
-apr_status_t redirectionio_protocol_send_filter_headers(redirectionio_connection *conn, redirectionio_context *ctx, request_rec *r, const char *project_key) {
-    apr_size_t                  wlen, clen;
+apr_status_t redirectionio_protocol_send_filter_headers(redirectionio_context *ctx, request_rec *r) {
     const apr_array_header_t    *tarr = apr_table_elts(r->headers_out);
     const apr_table_entry_t     *telts = (const apr_table_entry_t*)tarr->elts;
-    cJSON                       *query, *headers, *header, *item, *name, *value;
+    cJSON                       *headers, *new_headers, *header, *item, *name, *value;
     int                         i;
-    const char                  *dst;
-    apr_status_t                rv;
-    cJSON                       *result;
+    char                        *headers_str, *new_headers_str, *name_str, *value_str;
 
-    query = cJSON_CreateObject();
     headers = cJSON_CreateArray();
-
-    cJSON_AddItemToObject(query, "project_id", cJSON_CreateString(project_key));
-    cJSON_AddItemToObject(query, "rule_id", cJSON_CreateString(ctx->matched_rule_id));
-    cJSON_AddItemToObject(query, "headers", headers);
 
      for (i = 0; i < tarr->nelts; i++) {
         header = cJSON_CreateObject();
@@ -204,44 +168,25 @@ apr_status_t redirectionio_protocol_send_filter_headers(redirectionio_connection
         cJSON_AddItemToArray(headers, header);
     }
 
-    dst = cJSON_PrintUnformatted(query);
-    cJSON_Delete(query);
+    headers_str = cJSON_PrintUnformatted(headers);
+    new_headers_str = (char *)redirectionio_header_filter(ctx->matched_rule_str, headers_str);
+    cJSON_Delete(headers);
+    free(headers_str);
 
-    clen = sizeof(COMMAND_FILTER_HEADER_NAME);
-    rv = apr_socket_send(conn->rio_sock, COMMAND_FILTER_HEADER_NAME, &clen);
-
-    if (rv != APR_SUCCESS) {
-        ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, "mod_redirectionio: Error sending filter headers command: %s", apr_strerror(rv, errbuf, sizeof(errbuf)));
-
-        return rv;
+    if (new_headers_str == NULL) {
+        return APR_SUCCESS;
     }
 
-    wlen = strlen(dst) + 1;
-    rv = apr_socket_send(conn->rio_sock, dst, &wlen);
-    free((void *)dst);
+    new_headers = cJSON_Parse(new_headers_str);
 
-    if (rv != APR_SUCCESS) {
-        ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, "mod_redirectionio: Error sending filter headers command data: %s", apr_strerror(rv, errbuf, sizeof(errbuf)));
+    if (new_headers == NULL || new_headers->type != cJSON_Array) {
+        free(new_headers_str);
 
-        return rv;
-    }
-
-    rv = redirectionio_read_json_handler(conn, r->pool, &result);
-
-    if (rv != APR_SUCCESS) {
-        ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, "mod_redirectionio: Error receiving filter headers command result: %s", apr_strerror(rv, errbuf, sizeof(errbuf)));
-
-        return rv;
-    }
-
-    headers = cJSON_GetObjectItem(result, "headers");
-
-    if (headers == NULL || headers->type != cJSON_Array) {
         return APR_SUCCESS;
     }
 
     apr_table_clear(r->headers_out);
-    item = headers->child;
+    item = new_headers->child;
 
     while (item != NULL) {
         // Item is a header
@@ -253,138 +198,14 @@ apr_status_t redirectionio_protocol_send_filter_headers(redirectionio_connection
             continue;
         }
 
-        apr_table_setn(r->headers_out, name->valuestring, value->valuestring);
+        name_str = apr_pstrdup(r->pool, name->valuestring);
+        value_str = apr_pstrdup(r->pool, value->valuestring);
+
+        apr_table_setn(r->headers_out, name_str, value_str);
     }
 
-    return APR_SUCCESS;
-}
-
-apr_status_t redirectionio_protocol_send_filter_body_init(redirectionio_connection *conn, redirectionio_context *ctx, request_rec *r, const char *project_key) {
-    apr_size_t                  clen;
-    apr_status_t                rv;
-
-    clen = sizeof(COMMAND_FILTER_BODY_NAME);
-    rv = apr_socket_send(conn->rio_sock, COMMAND_FILTER_BODY_NAME, &clen);
-
-    if (rv != APR_SUCCESS) {
-        ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, "mod_redirectionio: Error sending filter body command: %s", apr_strerror(rv, errbuf, sizeof(errbuf)));
-
-        return rv;
-    }
-
-    rv = redirectionio_write_string(conn, project_key);
-
-    if (rv != APR_SUCCESS) {
-        ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, "mod_redirectionio: Error sending filter body project key: %s", apr_strerror(rv, errbuf, sizeof(errbuf)));
-
-        return rv;
-    }
-
-    rv = redirectionio_write_string(conn, ctx->matched_rule_id);
-
-    if (rv != APR_SUCCESS) {
-        ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, "mod_redirectionio: Error sending filter body rule id: %s", apr_strerror(rv, errbuf, sizeof(errbuf)));
-
-        return rv;
-    }
-
-    return APR_SUCCESS;
-}
-
-apr_status_t redirectionio_protocol_send_filter_body_chunk(redirectionio_connection *conn, const char *input, uint64_t input_size, const char **output, int64_t *output_size, apr_pool_t *pool) {
-    apr_size_t      llen;
-    apr_status_t    rv;
-    uint64_t        length;
-
-    llen = sizeof(uint64_t);
-    length = htonll(input_size);
-    // Send buffer
-    rv = apr_socket_send(conn->rio_sock, (const char *)&length, &llen);
-
-    if (rv != APR_SUCCESS) {
-        ap_log_error(APLOG_MARK, APLOG_ERR, 0, NULL, "mod_redirectionio: Error sending filter body chunk size: %s", apr_strerror(rv, errbuf, sizeof(errbuf)));
-
-        return rv;
-    }
-
-    rv = apr_socket_send(conn->rio_sock, input, &input_size);
-
-    if (rv != APR_SUCCESS) {
-        ap_log_error(APLOG_MARK, APLOG_ERR, 0, NULL, "mod_redirectionio: Error sending filter body chunk data: %s", apr_strerror(rv, errbuf, sizeof(errbuf)));
-
-        return rv;
-    }
-
-    // Receive filtered one
-    rv = apr_socket_recv(conn->rio_sock, (char *)output_size, &llen);
-
-    if (rv != APR_SUCCESS) {
-        ap_log_error(APLOG_MARK, APLOG_ERR, 0, NULL, "mod_redirectionio: Error receiving filter body chunk size: %s", apr_strerror(rv, errbuf, sizeof(errbuf)));
-
-        return rv;
-    }
-
-    *output_size = ntohll(*output_size);
-
-    if (*output_size <= 0) {
-        return APR_SUCCESS;
-    }
-
-    *output = (const char *) apr_palloc(pool, *output_size);
-    rv = apr_socket_recv(conn->rio_sock, (char *)*output, (apr_size_t *)output_size);
-
-    if (rv != APR_SUCCESS) {
-        ap_log_error(APLOG_MARK, APLOG_ERR, 0, NULL, "mod_redirectionio: Error receiving filter body chunk data: %s", apr_strerror(rv, errbuf, sizeof(errbuf)));
-
-        return rv;
-    }
-
-    return APR_SUCCESS;
-}
-
-apr_status_t redirectionio_protocol_send_filter_body_finish(redirectionio_connection *conn, const char **output, int64_t *output_size, apr_pool_t *pool) {
-    apr_size_t      llen;
-    apr_status_t    rv;
-    int64_t         length, dummy;
-
-    // Send buffer
-    llen = sizeof(int64_t);
-    length = -1;
-    rv = apr_socket_send(conn->rio_sock, (const char *)&length, &llen);
-
-    if (rv != APR_SUCCESS) {
-        ap_log_error(APLOG_MARK, APLOG_ERR, 0, NULL, "mod_redirectionio: Error sending filter body chunk size: %s", apr_strerror(rv, errbuf, sizeof(errbuf)));
-
-        return rv;
-    }
-
-    // Receive filtered one
-    rv = apr_socket_recv(conn->rio_sock, (char *)output_size, &llen);
-
-    if (rv != APR_SUCCESS) {
-        ap_log_error(APLOG_MARK, APLOG_ERR, 0, NULL, "mod_redirectionio: Error receiving filter body chunk size: %s", apr_strerror(rv, errbuf, sizeof(errbuf)));
-
-        return rv;
-    }
-
-    *output_size = ntohll(*output_size);
-
-    if (*output_size < 0) {
-        return APR_SUCCESS;
-    }
-
-    if (*output_size > 0) {
-        *output = (const char *) apr_palloc(pool, *output_size);
-        rv = apr_socket_recv(conn->rio_sock, (char *)*output, (apr_size_t *)output_size);
-
-        if (rv != APR_SUCCESS) {
-            ap_log_error(APLOG_MARK, APLOG_ERR, 0, NULL, "mod_redirectionio: Error receiving filter body chunk data: %s", apr_strerror(rv, errbuf, sizeof(errbuf)));
-
-            return rv;
-        }
-    }
-
-    apr_socket_recv(conn->rio_sock, (char *)&dummy, &llen);
+    cJSON_Delete(new_headers);
+    free(new_headers_str);
 
     return APR_SUCCESS;
 }
@@ -395,25 +216,7 @@ static apr_status_t redirectionio_json_cleanup(void *data) {
     return APR_SUCCESS;
 }
 
-static apr_status_t redirectionio_write_string(redirectionio_connection *conn, const char* data) {
-    apr_size_t      llen, slen;
-    uint64_t        length;
-    apr_status_t    rv;
-
-    llen = sizeof(uint64_t);
-    slen = strlen(data);
-    length = htonll(slen);
-
-    rv = apr_socket_send(conn->rio_sock, (const char *)&length, &llen);
-
-    if (rv != APR_SUCCESS) {
-        return rv;
-    }
-
-    return apr_socket_send(conn->rio_sock, data, &slen);
-}
-
-static apr_status_t redirectionio_read_json_handler(redirectionio_connection *conn, apr_pool_t *pool, cJSON **json) {
+static apr_status_t redirectionio_read_json_handler(redirectionio_connection *conn, apr_pool_t *pool, cJSON **json, char **json_str) {
     apr_size_t      rlen = 1;
     apr_size_t      len = 0;
     apr_size_t      max_size = 8192;
@@ -442,6 +245,7 @@ static apr_status_t redirectionio_read_json_handler(redirectionio_connection *co
 
             *buffer = '\0';
             *json = cJSON_Parse((char *)(buffer - len));
+            *json_str = (char *)(buffer - len);
 
             if (*json == NULL) {
                 return APR_EOF;

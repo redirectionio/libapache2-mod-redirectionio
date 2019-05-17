@@ -20,6 +20,8 @@ static int redirectionio_match_handler(request_rec *r);
 static int redirectionio_redirect_handler(request_rec *r);
 static int redirectionio_log_handler(request_rec *r);
 
+static int redirectionio_redirect_handler_for_status_code(request_rec *r, uint16_t status_code);
+
 static apr_status_t redirectionio_filter_match_on_response(ap_filter_t *f, apr_bucket_brigade *b);
 static apr_status_t redirectionio_filter_header_filtering(ap_filter_t *f, apr_bucket_brigade *b);
 static apr_status_t redirectionio_filter_body_filtering(ap_filter_t *f, apr_bucket_brigade *b);
@@ -124,14 +126,10 @@ static int redirectionio_match_handler(request_rec *r) {
         return DECLINED;
     }
 
-    ctx->matched_rule_id = NULL;
-    ctx->target = NULL;
-    ctx->status = 0;
-    ctx->match_on_response_status = 0;
+    ctx->matched_rule_str = NULL;
+    ctx->matched_rule = NULL;
+    ctx->filter_id = NULL;
     ctx->is_redirected = 0;
-    ctx->should_filter_body = 0;
-    ctx->should_filter_headers = 0;
-    ctx->body_filter_conn = NULL;
 
     ap_set_module_config(r->request_config, &redirectionio_module, ctx);
     redirectionio_connection* conn = redirectionio_acquire_connection(config, r->pool);
@@ -169,7 +167,9 @@ static void ap_headers_insert_output_filter(request_rec *r) {
     ap_add_output_filter("redirectionio_body_filter", ctx, r, r->connection);
 }
 
-static int redirectionio_redirect_handler(request_rec *r) {
+static int redirectionio_redirect_handler_for_status_code(request_rec *r, uint16_t status_code) {
+    char                    *redirect_str, *location_str;
+    cJSON                   *redirect, *location, *status;
     redirectionio_config    *config = (redirectionio_config*) ap_get_module_config(r->per_dir_config, &redirectionio_module);
 
     // Not enabled
@@ -184,41 +184,46 @@ static int redirectionio_redirect_handler(request_rec *r) {
     }
 
     // No match here
-    if (ctx->status == 0 || ctx->is_redirected == 1) {
+    if (ctx->matched_rule_str == NULL || ctx->is_redirected == 1) {
         return DECLINED;
     }
 
-    if (ctx->match_on_response_status > 0) {
+    redirect_str = (char *)redirectionio_get_redirect(ctx->matched_rule_str, r->unparsed_uri, status_code);
+
+    if (redirect_str == NULL) {
         return DECLINED;
     }
 
-    if (ctx->status != 410) {
-        apr_table_setn(r->headers_out, "Location", ctx->target);
+    redirect = cJSON_Parse(redirect_str);
+
+    if (redirect == NULL) {
+        return DECLINED;
     }
 
-    r->status = ctx->status;
+    status = cJSON_GetObjectItem(redirect, "status_code");
+    location = cJSON_GetObjectItem(redirect, "location");
+
+    if (status == NULL || location == NULL) {
+        return DECLINED;
+    }
+
+    if (status->valueint != 410) {
+        location_str = apr_pstrdup(r->pool, location->valuestring);
+        apr_table_setn(r->headers_out, "Location", location_str);
+    }
+
+    r->status = status->valueint;
     ctx->is_redirected = 1;
 
-    return ctx->status;
+    return r->status;
+}
+
+static int redirectionio_redirect_handler(request_rec *r) {
+    return redirectionio_redirect_handler_for_status_code(r, 0);
 }
 
 static apr_status_t redirectionio_filter_match_on_response(ap_filter_t *f, apr_bucket_brigade *bb) {
-    redirectionio_context   *ctx = (redirectionio_context *)f->ctx;
-
-    if (ctx == NULL) {
-        return ap_pass_brigade(f->next, bb);
-    }
-
-    if (ctx->is_redirected || ctx->status == 0 || (ctx->match_on_response_status > 0 && ctx->match_on_response_status != f->r->status)) {
-        return ap_pass_brigade(f->next, bb);
-    }
-
-    if (ctx->status != 410) {
-        apr_table_setn(f->r->headers_out, "Location", ctx->target);
-    }
-
-    f->r->status = ctx->status;
-    ctx->is_redirected = 1;
+    redirectionio_redirect_handler_for_status_code(f->r, f->r->status);
 
     /* remove ourselves from the filter chain */
     ap_remove_output_filter(f);
@@ -228,43 +233,26 @@ static apr_status_t redirectionio_filter_match_on_response(ap_filter_t *f, apr_b
 
 static apr_status_t redirectionio_filter_header_filtering(ap_filter_t *f, apr_bucket_brigade *bb) {
     redirectionio_context   *ctx = (redirectionio_context *)f->ctx;
-    redirectionio_config    *config = (redirectionio_config*) ap_get_module_config(f->r->per_dir_config, &redirectionio_module);
 
     if (ctx == NULL) {
         return ap_pass_brigade(f->next, bb);
     }
 
-    if (ctx->should_filter_headers == 0 || (ctx->is_redirected != 1 && ctx->match_on_response_status > 0 && ctx->match_on_response_status != f->r->status)) {
+    if (ctx->matched_rule_str == NULL) {
         return ap_pass_brigade(f->next, bb);
     }
 
+    redirectionio_protocol_send_filter_headers(ctx, f->r);
     ap_remove_output_filter(f);
-
-    // Get connection
-    redirectionio_connection* conn = redirectionio_acquire_connection(config, f->r->pool);
-
-    if (conn == NULL) {
-        return ap_pass_brigade(f->next, bb);
-    }
-
-    // Send headers
-    if (redirectionio_protocol_send_filter_headers(conn, ctx, f->r, config->project_key) != APR_SUCCESS) {
-        redirectionio_invalidate_connection(conn, config, f->r->pool);
-
-        return ap_pass_brigade(f->next, bb);
-    }
-
-    redirectionio_release_connection(conn, config, f->r->pool);
 
     return ap_pass_brigade(f->next, bb);
 }
 
 static apr_status_t redirectionio_filter_body_filtering(ap_filter_t *f, apr_bucket_brigade *bb) {
     redirectionio_context   *ctx = (redirectionio_context *)f->ctx;
-    redirectionio_config    *config = (redirectionio_config*) ap_get_module_config(f->r->per_dir_config, &redirectionio_module);
     apr_bucket              *b, *b_new;
     apr_bucket_brigade      *bb_new;
-    const char              *input, *output;
+    const char              *input, *output, *input_str;
     int64_t                 input_size, output_size;
     apr_status_t            rv;
 
@@ -272,22 +260,14 @@ static apr_status_t redirectionio_filter_body_filtering(ap_filter_t *f, apr_buck
         return ap_pass_brigade(f->next, bb);
     }
 
-    if (ctx->should_filter_body == 0 || (ctx->is_redirected != 1 && ctx->match_on_response_status > 0 && ctx->match_on_response_status != f->r->status)) {
+    if (ctx->matched_rule_str == NULL) {
         return ap_pass_brigade(f->next, bb);
     }
 
-    // If first -> remove content_length, get_connection, init filtering command
-    if (ctx->body_filter_conn == NULL) {
-        ctx->body_filter_conn = redirectionio_acquire_connection(config, f->r->pool);
+    if (ctx->filter_id == NULL) {
+        ctx->filter_id = (char *)redirectionio_create_body_filter(ctx->matched_rule_str);
 
-        if (ctx->body_filter_conn == NULL) {
-            ap_remove_output_filter(f);
-
-            return ap_pass_brigade(f->next, bb);
-        }
-
-        if (redirectionio_protocol_send_filter_body_init(ctx->body_filter_conn, ctx, f->r, config->project_key) != APR_SUCCESS) {
-            redirectionio_invalidate_connection(ctx->body_filter_conn, config, f->r->pool);
+        if (ctx->filter_id == NULL) {
             ap_remove_output_filter(f);
 
             return ap_pass_brigade(f->next, bb);
@@ -310,7 +290,8 @@ static apr_status_t redirectionio_filter_body_filtering(ap_filter_t *f, apr_buck
         rv = apr_bucket_read(b, &input, (apr_size_t *)&input_size, APR_BLOCK_READ);
 
         if (rv != APR_SUCCESS) {
-            redirectionio_invalidate_connection(ctx->body_filter_conn, config, f->r->pool);
+            free(ctx->filter_id);
+            ctx->filter_id = NULL;
             ap_remove_output_filter(f);
 
             return ap_pass_brigade(f->next, bb);
@@ -318,21 +299,23 @@ static apr_status_t redirectionio_filter_body_filtering(ap_filter_t *f, apr_buck
 
         // Send bucket
         if (input_size > 0) {
-            rv = redirectionio_protocol_send_filter_body_chunk(ctx->body_filter_conn, input, input_size, &output, &output_size, f->r->pool);
+            input_str = strndup(input, input_size);
+            output = redirectionio_body_filter(ctx->filter_id, input_str);
+            free((char *)input_str);
 
-            if (rv != APR_SUCCESS) {
-                redirectionio_invalidate_connection(ctx->body_filter_conn, config, f->r->pool);
+            if (output == NULL) {
                 ap_remove_output_filter(f);
 
                 return ap_pass_brigade(f->next, bb);
             }
+
+            output_size = strlen(output);
 
             // Create a new one
             if (output_size > 0) {
                 b_new = apr_bucket_transient_create(output, output_size, f->r->connection->bucket_alloc);
 
                 if (b_new == NULL) {
-                    redirectionio_invalidate_connection(ctx->body_filter_conn, config, f->r->pool);
                     ap_remove_output_filter(f);
 
                     return ap_pass_brigade(f->next, bb);
@@ -344,22 +327,21 @@ static apr_status_t redirectionio_filter_body_filtering(ap_filter_t *f, apr_buck
         }
 
         if (APR_BUCKET_IS_EOS(b)) {
-            // Send termination to the connection and wait for it to return us the last data
-            rv = redirectionio_protocol_send_filter_body_finish(ctx->body_filter_conn, &output, &output_size, f->r->pool);
+            output = redirectionio_body_filter_end(ctx->filter_id);
 
-            if (rv != APR_SUCCESS) {
-                redirectionio_invalidate_connection(ctx->body_filter_conn, config, f->r->pool);
+            if (output == NULL) {
                 ap_remove_output_filter(f);
 
                 return ap_pass_brigade(f->next, bb);
             }
+
+            output_size = strlen(output);
 
             if (output_size > 0) {
                 // Create a new one
                 b_new = apr_bucket_transient_create(output, output_size, f->r->connection->bucket_alloc);
 
                 if (b_new == NULL) {
-                    redirectionio_invalidate_connection(ctx->body_filter_conn, config, f->r->pool);
                     ap_remove_output_filter(f);
 
                     return ap_pass_brigade(f->next, bb);
@@ -373,16 +355,12 @@ static apr_status_t redirectionio_filter_body_filtering(ap_filter_t *f, apr_buck
             b_new = apr_bucket_eos_create(f->r->connection->bucket_alloc);
 
             if (b_new == NULL) {
-                redirectionio_invalidate_connection(ctx->body_filter_conn, config, f->r->pool);
                 ap_remove_output_filter(f);
 
                 return ap_pass_brigade(f->next, bb);
             }
 
             APR_BRIGADE_INSERT_TAIL(bb_new, b_new);
-
-            // Release connection
-            redirectionio_release_connection(ctx->body_filter_conn, config, f->r->pool);
 
             // Remove filter
             ap_remove_output_filter(f);
