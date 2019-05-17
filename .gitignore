@@ -1,2 +1,5 @@
 src/*.o
 src/*.so
+Makefile
+config.status
+config.log
