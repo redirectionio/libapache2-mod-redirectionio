@@ -1,5 +1,2 @@
-src/*.la
-src/*.lo
 src/*.o
-src/*.slo
-src/.libs
+src/*.so

@@ -3,6 +3,7 @@
 
 #include "apr_network_io.h"
 #include "apr_reslist.h"
+#include "redirectionio.h"
 
 #ifndef APR_UNIX
 #if defined (AF_UNIX)
