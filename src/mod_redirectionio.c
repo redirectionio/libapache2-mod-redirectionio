@@ -42,6 +42,7 @@ static const char *redirectionio_set_enable(cmd_parms *cmd, void *cfg, const cha
 static const char *redirectionio_set_project_key(cmd_parms *cmd, void *cfg, const char *arg);
 static const char *redirectionio_set_logs_enable(cmd_parms *cmd, void *cfg, const char *arg);
 static const char *redirectionio_set_pass(cmd_parms *cmd, void *cfg, const char *arg);
+static void redirectionio_apache_log_callback(const char* log_str, const void* data);
 
 static const command_rec redirectionio_directives[] = {
     AP_INIT_TAKE1("redirectionio", redirectionio_set_enable, NULL, OR_ALL, "Enable or disable redirectionio"),
@@ -137,6 +138,9 @@ static int redirectionio_match_handler(request_rec *r) {
     if (conn == NULL) {
         return DECLINED;
     }
+
+    // Init logging
+    redirectionio_init_log_callback(redirectionio_apache_log_callback, r);
 
     // Ask for redirection
     if (redirectionio_protocol_match(conn, ctx, r, config->project_key) != APR_SUCCESS) {
@@ -715,4 +719,8 @@ static const char *redirectionio_set_pass(cmd_parms *cmd, void *cfg, const char 
     }
 
     return NULL;
+}
+
+static void redirectionio_apache_log_callback(const char* log_str, const void* data) {
+    ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, (request_rec *)data, "mod_redirectionio api error: %s", log_str);
 }
