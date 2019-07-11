@@ -9,12 +9,19 @@ https://redirection.io/documentation/developer-documentation/apache-module
 
 ### Manual
 
-To compile manually this module you will need [apxs](https://httpd.apache.org/docs/2.4/programs/apxs.html), then simply use
-the Makefile present in this repository:
+To manually build this library you will need to compile first the [libredirectionio library](https://github.com/redirectionio/libredirectionio)
+in some path (e.g. `/tmp/libredirectionio`)
 
-`make` to compile this module
+You will need [apxs](https://httpd.apache.org/docs/2.4/programs/apxs.html) installed and available
 
-`make install` to install it
+Then simply do the following command:
+
+```
+./configure --with-libredirectionio=/tmp/libredirectionio
+make
+```
+
+You can run `make install` to install your module to the current apache2 module folder (you may need root permissions in order to do so).
 
 ## Directives
 
