@@ -14,7 +14,7 @@ in some path (e.g. `/tmp/libredirectionio`)
 
 You will need [apxs](https://httpd.apache.org/docs/2.4/programs/apxs.html) installed and available
 
-Then simply do the following command:
+Then execute the following command:
 
 ```
 ./configure --with-libredirectionio=/tmp/libredirectionio
