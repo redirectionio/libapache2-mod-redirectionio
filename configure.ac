@@ -11,10 +11,6 @@ AC_ARG_WITH(
 		APXS=${withval}
 	],)
 
-AC_ARG_WITH([libredirectionio], [AS_HELP_STRING([--with-libredirectionio],
-    [libredirectionio path])],
-    [LIBREDIRECTIONIO=$withval],)
-
 if test "x$APXS" = "x"; then
     # The user didn't specify the --with-apxs2-option.
 
@@ -40,32 +36,11 @@ The executable may also be named 'apxs2'.
 ])
 fi
 
-AC_CHECK_FILE([$LIBREDIRECTIONIO], [], [
-    AC_MSG_ERROR([
-Could not find libredirectionio directory.
-Please spesify the path to the libredirectionio directory
-using the --with-libredirectionio=/full/path/to/libredirectionio option.
-])
-])
+# Dependencies
+PKG_PROG_PKG_CONFIG
+PKG_INSTALLDIR
 
-LIBREDIRECTIONIO_HEADER="$LIBREDIRECTIONIO/target"
-LIBREDIRECTIONIO_LIB="$LIBREDIRECTIONIO/target/release"
-
-AC_CHECK_FILE([$LIBREDIRECTIONIO_HEADER/redirectionio.h], [], [
-    AC_MSG_ERROR([
-Could not find redirection.h header file.
-Please compile libredirectionio before making the apache module
-using the cargo build --release command
-])
-])
-
-AC_CHECK_FILE([$LIBREDIRECTIONIO_LIB/libredirectionio.a], [], [
-    AC_MSG_ERROR([
-Could not find libredirectionio.a file.
-Please compile libredirectionio before making the apache module
-using the cargo build --release command
-])
-])
+PKG_CHECK_MODULES([redirectionio], [libredirectionio >= 0.0.1])
 
 # Checks for programs.
 AC_PROG_CC
@@ -82,8 +57,8 @@ LDFLAGS="-L$($APXS -q libdir) -L$LIBREDIRECTIONIO_LIB $LDFLAGS"
 HTTPD_VERSION="$($APXS -q HTTPD_VERSION)"
 CC="$($APXS -q CC)"
 CFLAGS="$($APXS -q CFLAGS) $($APXS -q CPPFLAGS) $($APXS -q EXTRA_CPPFLAGS) $($APXS -q EXTRA_CFLAGS) -I$($APXS -q includedir) -I$($APXS -q APR_INCLUDEDIR)"
-CFLAGS="$CFLAGS -Wall -g -std=c99 -DPROXY_VERSION=$PROXY_VERSION -I$LIBREDIRECTIONIO_HEADER"
-LIBS="-Wl,-Bstatic -lredirectionio -Wl,-Bdynamic $LIBS"
+CFLAGS="$CFLAGS -Wall -g -std=c99 -DPROXY_VERSION=$PROXY_VERSION $redirectionio_CFLAGS"
+LIBS="$LIBS $redirectionio_LIBS"
 LIBTOOL="$($APXS -q LIBTOOL)"
 MODULE_DIR="$($APXS -q exp_libexecdir)"
 
