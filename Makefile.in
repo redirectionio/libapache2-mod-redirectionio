@@ -5,6 +5,8 @@ SRC=src/mod_redirectionio.c \
 
 OBJ=$(SRC:.c=.o)
 
+DESTDIR ?=
+
 all: src/mod_redirectionio.so
 
 %.o: %.c %.h
@@ -15,7 +17,8 @@ src/mod_redirectionio.so: $(OBJ)
 
 .PHONY:	install
 install: src/mod_redirectionio.so
-	cp src/mod_redirectionio.so @MODULE_DIR@/mod_redirectionio.so
+	mkdir -p $(DESTDIR)@MODULE_DIR@/
+	install -c -m 644 src/mod_redirectionio.so $(DESTDIR)@MODULE_DIR@/mod_redirectionio.so
 
 .PHONY:	clean
 clean:
