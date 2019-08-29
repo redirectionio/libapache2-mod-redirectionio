@@ -9,12 +9,10 @@ https://redirection.io/documentation/developer-documentation/apache-module
 
 ### Manual
 
-To manually build this library you will need to compile first the [libredirectionio library](https://github.com/redirectionio/libredirectionio)
-in some path (e.g. `/tmp/libredirectionio`)
+To manually build this library you will need to compile and install the [libredirectionio library](https://github.com/redirectionio/libredirectionio).
+You also need [apxs](https://httpd.apache.org/docs/2.4/programs/apxs.html) installed and available
 
-You will need [apxs](https://httpd.apache.org/docs/2.4/programs/apxs.html) installed and available
-
-Then execute the following command:
+Then execute the following commands:
 
 ```
 autoreconf -i
