@@ -17,7 +17,8 @@ You will need [apxs](https://httpd.apache.org/docs/2.4/programs/apxs.html) insta
 Then execute the following command:
 
 ```
-./configure --with-libredirectionio=/tmp/libredirectionio
+autoreconf -i
+./configure
 make
 ```
 
