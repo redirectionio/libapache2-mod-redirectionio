@@ -38,7 +38,6 @@ fi
 
 # Dependencies
 PKG_PROG_PKG_CONFIG
-PKG_INSTALLDIR
 
 PKG_CHECK_MODULES([redirectionio], [libredirectionio >= 0.0.1])
 
