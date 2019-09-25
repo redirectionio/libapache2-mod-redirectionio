@@ -533,6 +533,7 @@ static void *create_redirectionio_dir_conf(apr_pool_t *pool, char *context) {
         config->port = 10301;
         config->server = "127.0.0.1";
         config->pass_set = -1;
+        config->pool = pool;
     }
 
     return config;
