@@ -4,7 +4,6 @@
 #include "apr_network_io.h"
 #include "apr_reslist.h"
 #include "redirectionio.h"
-#include "json.h"
 
 #ifndef APR_UNIX
 #if defined (AF_UNIX)
@@ -51,10 +50,9 @@ typedef struct {
 } redirectionio_connection;
 
 typedef struct {
-    char    *matched_rule_str;
-    cJSON   *matched_rule;
-    char    *filter_id;
-    int     is_redirected;
+    struct REDIRECTIONIO_Action             *action;
+    struct REDIRECTIONIO_FilterBodyAction   *body_filter;
+    int                                     is_redirected;
 } redirectionio_context;
 
 #endif

@@ -1,6 +1,5 @@
 # Source files. mod_auth_mellon.c must be the first file.
 SRC=src/mod_redirectionio.c \
-	src/json.c \
 	src/redirectionio_protocol.c
 
 OBJ=$(SRC:.c=.o)

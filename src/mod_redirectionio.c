@@ -127,9 +127,8 @@ static int redirectionio_match_handler(request_rec *r) {
         return DECLINED;
     }
 
-    ctx->matched_rule_str = NULL;
-    ctx->matched_rule = NULL;
-    ctx->filter_id = NULL;
+    ctx->action = NULL;
+    ctx->body_filter = NULL;
     ctx->is_redirected = 0;
 
     ap_set_module_config(r->request_config, &redirectionio_module, ctx);
@@ -140,7 +139,7 @@ static int redirectionio_match_handler(request_rec *r) {
     }
 
     // Init logging
-    redirectionio_init_log_callback(redirectionio_apache_log_callback, r);
+    redirectionio_log_init_with_callback(redirectionio_apache_log_callback, r);
 
     // Ask for redirection
     if (redirectionio_protocol_match(conn, ctx, r, config->project_key) != APR_SUCCESS) {
@@ -172,8 +171,7 @@ static void ap_headers_insert_output_filter(request_rec *r) {
 }
 
 static int redirectionio_redirect_handler_for_status_code(request_rec *r, uint16_t status_code) {
-    char                    *redirect_str, *location_str;
-    cJSON                   *redirect, *location, *status;
+    apr_uint16_t            new_status_code;
     redirectionio_config    *config = (redirectionio_config*) ap_get_module_config(r->per_dir_config, &redirectionio_module);
 
     // Not enabled
@@ -188,35 +186,17 @@ static int redirectionio_redirect_handler_for_status_code(request_rec *r, uint16
     }
 
     // No match here
-    if (ctx->matched_rule_str == NULL || ctx->is_redirected == 1) {
+    if (ctx->action == NULL || ctx->is_redirected == 1) {
         return DECLINED;
     }
 
-    redirect_str = (char *)redirectionio_get_redirect(ctx->matched_rule_str, r->unparsed_uri, status_code);
+    new_status_code = redirectionio_action_get_status_code(ctx->action, status_code);
 
-    if (redirect_str == NULL) {
+    if (new_status_code == 0) {
         return DECLINED;
     }
 
-    redirect = cJSON_Parse(redirect_str);
-
-    if (redirect == NULL) {
-        return DECLINED;
-    }
-
-    status = cJSON_GetObjectItem(redirect, "status_code");
-    location = cJSON_GetObjectItem(redirect, "location");
-
-    if (status == NULL || location == NULL) {
-        return DECLINED;
-    }
-
-    if (status->valueint != 410) {
-        location_str = apr_pstrdup(r->pool, location->valuestring);
-        apr_table_setn(r->headers_out, "Location", location_str);
-    }
-
-    r->status = status->valueint;
+    r->status = new_status_code;
     ctx->is_redirected = 1;
 
     return r->status;
@@ -242,7 +222,7 @@ static apr_status_t redirectionio_filter_header_filtering(ap_filter_t *f, apr_bu
         return ap_pass_brigade(f->next, bb);
     }
 
-    if (ctx->matched_rule_str == NULL) {
+    if (ctx->action == NULL) {
         return ap_pass_brigade(f->next, bb);
     }
 
@@ -264,14 +244,14 @@ static apr_status_t redirectionio_filter_body_filtering(ap_filter_t *f, apr_buck
         return ap_pass_brigade(f->next, bb);
     }
 
-    if (ctx->matched_rule_str == NULL) {
+    if (ctx->action == NULL) {
         return ap_pass_brigade(f->next, bb);
     }
 
-    if (ctx->filter_id == NULL) {
-        ctx->filter_id = (char *)redirectionio_create_body_filter(ctx->matched_rule_str);
+    if (ctx->body_filter == NULL) {
+        ctx->body_filter = (struct REDIRECTIONIO_FilterBodyAction *)redirectionio_action_body_filter_create(ctx->action, f->r->status);
 
-        if (ctx->filter_id == NULL) {
+        if (ctx->body_filter == NULL) {
             ap_remove_output_filter(f);
 
             return ap_pass_brigade(f->next, bb);
@@ -294,8 +274,8 @@ static apr_status_t redirectionio_filter_body_filtering(ap_filter_t *f, apr_buck
         rv = apr_bucket_read(b, &input, (apr_size_t *)&input_size, APR_BLOCK_READ);
 
         if (rv != APR_SUCCESS) {
-            free(ctx->filter_id);
-            ctx->filter_id = NULL;
+            redirectionio_action_body_filter_close(ctx->body_filter);
+            ctx->body_filter = NULL;
             ap_remove_output_filter(f);
 
             return ap_pass_brigade(f->next, bb);
@@ -304,7 +284,7 @@ static apr_status_t redirectionio_filter_body_filtering(ap_filter_t *f, apr_buck
         // Send bucket
         if (input_size > 0) {
             input_str = strndup(input, input_size);
-            output = redirectionio_body_filter(ctx->filter_id, input_str);
+            output = redirectionio_action_body_filter_filter(ctx->body_filter, input_str);
             free((char *)input_str);
 
             if (output == NULL) {
@@ -331,7 +311,7 @@ static apr_status_t redirectionio_filter_body_filtering(ap_filter_t *f, apr_buck
         }
 
         if (APR_BUCKET_IS_EOS(b)) {
-            output = redirectionio_body_filter_end(ctx->filter_id);
+            output = redirectionio_action_body_filter_close(ctx->body_filter);
 
             if (output == NULL) {
                 ap_remove_output_filter(f);
