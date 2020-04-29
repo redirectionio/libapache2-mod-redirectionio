@@ -233,11 +233,6 @@ apr_status_t redirectionio_protocol_send_filter_headers(redirectionio_context *c
         first_header = current_header;
     }
 
-    // No header
-    if (first_header == NULL) {
-        return APR_SUCCESS;
-    }
-
     first_header = (struct REDIRECTIONIO_HeaderMap *)redirectionio_action_header_filter_filter(ctx->action, first_header, r->status);
 
     // Even if error returns success, as it does not affect anything
