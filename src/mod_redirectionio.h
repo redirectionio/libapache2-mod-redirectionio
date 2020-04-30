@@ -50,7 +50,9 @@ typedef struct {
 } redirectionio_connection;
 
 typedef struct {
+    struct REDIRECTIONIO_Request            *request;
     struct REDIRECTIONIO_Action             *action;
+    struct REDIRECTIONIO_HeaderMap          *response_headers;
     struct REDIRECTIONIO_FilterBodyAction   *body_filter;
 } redirectionio_context;
 

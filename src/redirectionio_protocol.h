@@ -4,6 +4,8 @@
 #include "mod_redirectionio.h"
 #include "httpd.h"
 
+const char *ap_run_http_scheme(const request_rec *r);
+
 #define REDIRECTIONIO_PROTOCOL_VERSION_MAJOR 1
 #define REDIRECTIONIO_PROTOCOL_VERSION_MINOR 0
 

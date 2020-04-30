@@ -127,7 +127,9 @@ static int redirectionio_match_handler(request_rec *r) {
         return DECLINED;
     }
 
+    ctx->request = NULL;
     ctx->action = NULL;
+    ctx->response_headers = NULL;
     ctx->body_filter = NULL;
 
     ap_set_module_config(r->request_config, &redirectionio_module, ctx);

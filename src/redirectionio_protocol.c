@@ -7,8 +7,6 @@
 
 static char errbuf[1024];
 
-const char COMMAND_LOG_QUERY[] = "{ \"project_id\": \"%s\", \"request_uri\": \"%s\", \"host\": \"%s\", \"rule_id\": \"%s\", \"target\": \"%s\", \"status_code\": %d, \"user_agent\": \"%s\", \"referer\": \"%s\", \"method\": \"%s\", \"proxy\": \"%s\" }";
-
 static apr_status_t redirectionio_send_uint8(redirectionio_connection *conn, unsigned char uint8);
 
 static apr_status_t redirectionio_send_uint16(redirectionio_connection *conn, apr_uint16_t uint16);
@@ -27,14 +25,13 @@ static apr_status_t redirectionio_action_cleanup(void *action);
 
 static apr_status_t redirectionio_request_cleanup(void *request);
 
-static apr_status_t redirectionio_request_serialized_cleanup(void *request_serialized);
+static apr_status_t redirectionio_response_headers_cleanup(void *response_headers);
 
 apr_status_t redirectionio_protocol_match(redirectionio_connection *conn, redirectionio_context *ctx, request_rec *r, const char *project_key) {
     apr_uint32_t                    alen;
     apr_status_t                    rv;
-    struct REDIRECTIONIO_Request    *redirectionio_request;
     struct REDIRECTIONIO_HeaderMap  *first_header = NULL, *current_header = NULL;
-    const char                      *request_serialized;
+    const char                      *request_serialized, *scheme;
     char                            *action_serialized;
     const apr_array_header_t        *tarr = apr_table_elts(r->headers_in);
     const apr_table_entry_t         *telts = (const apr_table_entry_t*)tarr->elts;
@@ -56,22 +53,21 @@ apr_status_t redirectionio_protocol_match(redirectionio_connection *conn, redire
     }
 
     // Create redirection io request
-    redirectionio_request = (struct REDIRECTIONIO_Request *)redirectionio_request_create(r->unparsed_uri, r->method, first_header);
+    scheme = r->parsed_uri.scheme ? r->parsed_uri.scheme : ap_http_scheme(r);
+    ctx->request = (struct REDIRECTIONIO_Request *)redirectionio_request_create(r->unparsed_uri, r->hostname, scheme, r->method, first_header);
 
-    if (redirectionio_request == NULL) {
+    if (ctx->request == NULL) {
         return APR_EGENERAL;
     }
 
-    apr_pool_pre_cleanup_register(r->pool, redirectionio_request, redirectionio_request_cleanup);
+    apr_pool_pre_cleanup_register(r->pool, ctx->request, redirectionio_request_cleanup);
 
     // Serialize request
-    request_serialized = redirectionio_request_json_serialize(redirectionio_request);
+    request_serialized = redirectionio_request_json_serialize(ctx->request);
 
     if (request_serialized == NULL) {
         return APR_EGENERAL;
     }
-
-    apr_pool_pre_cleanup_register(r->pool, request_serialized, redirectionio_request_serialized_cleanup);
 
     // Send protocol header
     rv = redirectionio_send_protocol_header(conn, project_key, REDIRECTIONIO_PROTOCOL_COMMAND_MATCH_ACTION, r);
@@ -84,6 +80,7 @@ apr_status_t redirectionio_protocol_match(redirectionio_connection *conn, redire
     rv = redirectionio_send_uint32(conn, strlen(request_serialized));
 
     if (rv != APR_SUCCESS) {
+        free((void *)request_serialized);
         ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, "mod_redirectionio: Error sending request length: %s", apr_strerror(rv, errbuf, sizeof(errbuf)));
 
         return rv;
@@ -91,6 +88,7 @@ apr_status_t redirectionio_protocol_match(redirectionio_connection *conn, redire
 
     // Send serialized request
     rv = redirectionio_send_string(conn, request_serialized, strlen(request_serialized));
+    free((void *)request_serialized);
 
     if (rv != APR_SUCCESS) {
         ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, "mod_redirectionio: Error sending request: %s", apr_strerror(rv, errbuf, sizeof(errbuf)));
@@ -136,68 +134,20 @@ apr_status_t redirectionio_protocol_match(redirectionio_connection *conn, redire
 
 apr_status_t redirectionio_protocol_log(redirectionio_connection *conn, redirectionio_context *ctx, request_rec *r, const char *project_key) {
     apr_size_t      wlen;
-    const char      *location;
-    const char      *user_agent = apr_table_get(r->headers_in, "User-Agent");
-    const char      *referer = apr_table_get(r->headers_in, "Referer");
-    char            *rule_id_str = NULL;
     apr_status_t    rv;
-    char            *dst;
     request_rec     *response = r;
+    const char      *log;
 
     // Only trust last response for data
     while (response->next) {
         response = response->next;
     }
 
-    location = apr_table_get(response->headers_out, "Location");
+    log = redirectionio_api_create_log_in_json(ctx->request, response->status, ctx->response_headers, ctx->action, PROXY_VERSION_STR(PROXY_VERSION), response->request_time);
 
-    if (location == NULL) {
-        location = "";
+    if (log == NULL) {
+        return APR_EGENERAL;
     }
-
-    if (user_agent == NULL) {
-        user_agent = "";
-    }
-
-    if (referer == NULL) {
-        referer = "";
-    }
-
-    if (rule_id_str == NULL) {
-        rule_id_str = "";
-    }
-
-    wlen =
-        sizeof(COMMAND_LOG_QUERY)
-        + strlen(project_key)
-        + strlen(r->unparsed_uri)
-        + strlen(r->hostname)
-        + strlen(rule_id_str)
-        + strlen(location)
-        + 3 // Status code length
-        + strlen(user_agent)
-        + strlen(referer)
-        + strlen(r->method)
-        + strlen(PROXY_VERSION_STR(PROXY_VERSION))
-        - 20 // 10 * 2 (%x) characters replaced with values
-    ;
-
-    dst = (char *) apr_palloc(r->pool, wlen);
-
-    sprintf(
-        dst,
-        COMMAND_LOG_QUERY,
-        project_key,
-        r->unparsed_uri,
-        r->hostname,
-        rule_id_str,
-        location,
-        response->status,
-        user_agent,
-        referer,
-        r->method,
-        PROXY_VERSION_STR(PROXY_VERSION)
-    );
 
     // Send protocol header
     rv = redirectionio_send_protocol_header(conn, project_key, REDIRECTIONIO_PROTOCOL_COMMAND_LOG, r);
@@ -206,6 +156,7 @@ apr_status_t redirectionio_protocol_log(redirectionio_connection *conn, redirect
         return rv;
     }
 
+    wlen = strlen(log);
     rv = redirectionio_send_uint32(conn, wlen);
 
     if (rv != APR_SUCCESS) {
@@ -214,7 +165,7 @@ apr_status_t redirectionio_protocol_log(redirectionio_connection *conn, redirect
         return rv;
     }
 
-    rv = apr_socket_send(conn->rio_sock, dst, &wlen);
+    rv = apr_socket_send(conn->rio_sock, log, &wlen);
 
     if (rv != APR_SUCCESS) {
         ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, "mod_redirectionio: Error sending log command data: %s", apr_strerror(rv, errbuf, sizeof(errbuf)));
@@ -248,12 +199,14 @@ apr_status_t redirectionio_protocol_send_filter_headers(redirectionio_context *c
     }
 
     first_header = (struct REDIRECTIONIO_HeaderMap *)redirectionio_action_header_filter_filter(ctx->action, first_header, r->status);
+    ctx->response_headers = first_header;
 
     // Even if error returns success, as it does not affect anything
     if (first_header == NULL) {
         return APR_SUCCESS;
     }
 
+    apr_pool_pre_cleanup_register(r->pool, ctx->response_headers, redirectionio_response_headers_cleanup);
     apr_table_clear(r->headers_out);
 
     while (first_header != NULL) {
@@ -262,15 +215,9 @@ apr_status_t redirectionio_protocol_send_filter_headers(redirectionio_context *c
             value_str = apr_pstrdup(r->pool, first_header->value);
 
             apr_table_setn(r->headers_out, name_str, value_str);
-
-            free((void *)first_header->name);
-            free((void *)first_header->value);
         }
 
-        current_header = first_header->next;
-        free(first_header);
-
-        first_header = current_header;
+        first_header = first_header->next;
     }
 
     return APR_SUCCESS;
@@ -454,8 +401,20 @@ static apr_status_t redirectionio_request_cleanup(void *request) {
     return APR_SUCCESS;
 }
 
-static apr_status_t redirectionio_request_serialized_cleanup(void *request_serialized) {
-    free(request_serialized);
+static apr_status_t redirectionio_response_headers_cleanup(void *response_headers) {
+    struct REDIRECTIONIO_HeaderMap  *first_header, *tmp_header;
+
+    first_header = (struct REDIRECTIONIO_HeaderMap *)response_headers;
+
+    while (first_header != NULL) {
+        tmp_header = first_header->next;
+
+        free((void *)first_header->name);
+        free((void *)first_header->value);
+        free((void *)first_header);
+
+        first_header = tmp_header;
+    }
 
     return APR_SUCCESS;
 }
