@@ -52,7 +52,6 @@ typedef struct {
 typedef struct {
     struct REDIRECTIONIO_Action             *action;
     struct REDIRECTIONIO_FilterBodyAction   *body_filter;
-    int                                     is_redirected;
 } redirectionio_context;
 
 #endif

@@ -129,7 +129,6 @@ static int redirectionio_match_handler(request_rec *r) {
 
     ctx->action = NULL;
     ctx->body_filter = NULL;
-    ctx->is_redirected = 0;
 
     ap_set_module_config(r->request_config, &redirectionio_module, ctx);
     redirectionio_connection* conn = redirectionio_acquire_connection(config, r->pool);
@@ -186,7 +185,7 @@ static int redirectionio_redirect_handler_for_status_code(request_rec *r, uint16
     }
 
     // No match here
-    if (ctx->action == NULL || ctx->is_redirected == 1) {
+    if (ctx->action == NULL) {
         return DECLINED;
     }
 
@@ -197,7 +196,6 @@ static int redirectionio_redirect_handler_for_status_code(request_rec *r, uint16
     }
 
     r->status = new_status_code;
-    ctx->is_redirected = 1;
 
     return r->status;
 }

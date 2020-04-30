@@ -23,6 +23,12 @@ static apr_status_t redirectionio_read_string(redirectionio_connection *conn, ch
 
 static apr_status_t redirectionio_send_protocol_header(redirectionio_connection *conn, const char *project_key, apr_uint16_t command, request_rec *r);
 
+static apr_status_t redirectionio_action_cleanup(void *action);
+
+static apr_status_t redirectionio_request_cleanup(void *request);
+
+static apr_status_t redirectionio_request_serialized_cleanup(void *request_serialized);
+
 apr_status_t redirectionio_protocol_match(redirectionio_connection *conn, redirectionio_context *ctx, request_rec *r, const char *project_key) {
     apr_uint32_t                    alen;
     apr_status_t                    rv;
@@ -56,12 +62,16 @@ apr_status_t redirectionio_protocol_match(redirectionio_connection *conn, redire
         return APR_EGENERAL;
     }
 
+    apr_pool_pre_cleanup_register(r->pool, redirectionio_request, redirectionio_request_cleanup);
+
     // Serialize request
     request_serialized = redirectionio_request_json_serialize(redirectionio_request);
 
     if (request_serialized == NULL) {
         return APR_EGENERAL;
     }
+
+    apr_pool_pre_cleanup_register(r->pool, request_serialized, redirectionio_request_serialized_cleanup);
 
     // Send protocol header
     rv = redirectionio_send_protocol_header(conn, project_key, REDIRECTIONIO_PROTOCOL_COMMAND_MATCH_ACTION, r);
@@ -115,6 +125,10 @@ apr_status_t redirectionio_protocol_match(redirectionio_connection *conn, redire
 
         // Unserialize action
         ctx->action = (struct REDIRECTIONIO_Action *)redirectionio_action_json_deserialize(action_serialized);
+
+        if (ctx->action != NULL) {
+            apr_pool_pre_cleanup_register(r->pool, ctx->action, redirectionio_action_cleanup);
+        }
     }
 
     return APR_SUCCESS;
@@ -248,12 +262,16 @@ apr_status_t redirectionio_protocol_send_filter_headers(redirectionio_context *c
             value_str = apr_pstrdup(r->pool, first_header->value);
 
             apr_table_setn(r->headers_out, name_str, value_str);
+
+            free((void *)first_header->name);
+            free((void *)first_header->value);
         }
 
-        first_header = first_header->next;
-    }
+        current_header = first_header->next;
+        free(first_header);
 
-    // @TODO DROP Header map
+        first_header = current_header;
+    }
 
     return APR_SUCCESS;
 }
@@ -424,3 +442,20 @@ static apr_status_t redirectionio_send_protocol_header(redirectionio_connection 
     return APR_SUCCESS;
 }
 
+static apr_status_t redirectionio_action_cleanup(void *action) {
+    redirectionio_action_drop(action);
+
+    return APR_SUCCESS;
+}
+
+static apr_status_t redirectionio_request_cleanup(void *request) {
+    redirectionio_request_drop(request);
+
+    return APR_SUCCESS;
+}
+
+static apr_status_t redirectionio_request_serialized_cleanup(void *request_serialized) {
+    free(request_serialized);
+
+    return APR_SUCCESS;
+}
