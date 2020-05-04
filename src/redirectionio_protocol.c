@@ -106,7 +106,7 @@ apr_status_t redirectionio_protocol_match(redirectionio_connection *conn, redire
     }
 
     // Read action
-    action_serialized = apr_palloc(r->pool, alen);
+    action_serialized = apr_palloc(r->pool, alen + 1);
 
     if (action_serialized == NULL) {
         return APR_EGENERAL;
@@ -329,6 +329,8 @@ static apr_status_t redirectionio_read_string(redirectionio_connection *conn, ch
         sdrlen += srlen;
         srlen = buf_size - sdrlen;
     }
+
+    *(string + buf_size) = '\0';
 
     return APR_SUCCESS;
 }
