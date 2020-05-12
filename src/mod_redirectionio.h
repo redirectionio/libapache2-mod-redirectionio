@@ -3,6 +3,15 @@
 
 #include "apr_network_io.h"
 #include "apr_reslist.h"
+#include "httpd.h"
+#include "http_config.h"
+#include "http_log.h"
+#include "http_protocol.h"
+#include "http_request.h"
+#include "ap_config.h"
+#include "apr_network_io.h"
+#include "apr_strings.h"
+#include "apr_uri.h"
 #include "redirectionio.h"
 
 #ifndef APR_UNIX
@@ -34,12 +43,14 @@
 
 typedef struct {
     const char*     project_key;
+    const char*     scheme;
     char*           server;
     int             port;
     int             protocol;
     int             enable;
     int             enable_logs;
     int             pass_set;
+    int             show_rule_ids;
     apr_reslist_t   *connection_pool;
     apr_pool_t      *pool;
 } redirectionio_config;
@@ -55,5 +66,7 @@ typedef struct {
     struct REDIRECTIONIO_HeaderMap          *response_headers;
     struct REDIRECTIONIO_FilterBodyAction   *body_filter;
 } redirectionio_context;
+
+module AP_MODULE_DECLARE_DATA redirectionio_module;
 
 #endif

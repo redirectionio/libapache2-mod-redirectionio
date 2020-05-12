@@ -1,12 +1,3 @@
-#include "httpd.h"
-#include "http_config.h"
-#include "http_log.h"
-#include "http_protocol.h"
-#include "http_request.h"
-#include "ap_config.h"
-#include "apr_network_io.h"
-#include "apr_strings.h"
-#include "apr_uri.h"
 #include "mod_redirectionio.h"
 #include "redirectionio_protocol.h"
 
@@ -41,6 +32,8 @@ static apr_status_t redirectionio_child_exit(void *resource);
 static const char *redirectionio_set_enable(cmd_parms *cmd, void *cfg, const char *arg);
 static const char *redirectionio_set_project_key(cmd_parms *cmd, void *cfg, const char *arg);
 static const char *redirectionio_set_logs_enable(cmd_parms *cmd, void *cfg, const char *arg);
+static const char *redirectionio_set_scheme(cmd_parms *cmd, void *cfg, const char *arg);
+static const char *redirectionio_set_show_rule_ids(cmd_parms *cmd, void *cfg, const char *arg);
 static const char *redirectionio_set_pass(cmd_parms *cmd, void *cfg, const char *arg);
 static void redirectionio_apache_log_callback(const char* log_str, const void* data, short level);
 
@@ -49,6 +42,8 @@ static const command_rec redirectionio_directives[] = {
     AP_INIT_TAKE1("redirectionioPass", redirectionio_set_pass, NULL, OR_ALL, "Agent server location"),
     AP_INIT_TAKE1("redirectionioProjectKey", redirectionio_set_project_key, NULL, OR_ALL, "RedirectionIO project key"),
     AP_INIT_TAKE1("redirectionioLogs", redirectionio_set_logs_enable, NULL, OR_ALL, "Enable or disable logging for redirectionio"),
+    AP_INIT_TAKE1("redirectionioScheme", redirectionio_set_scheme, NULL, OR_ALL, "Force scheme to use when matching request"),
+    AP_INIT_TAKE1("redirectionioRuleIdsHeader", redirectionio_set_show_rule_ids, NULL, OR_ALL, "Show rule ids used on response header"),
     { NULL }
 };
 
@@ -509,11 +504,13 @@ static void *create_redirectionio_dir_conf(apr_pool_t *pool, char *context) {
         config->enable = -1;
         config->enable_logs = -1;
         config->project_key = NULL;
+        config->scheme = NULL;
         config->protocol = TCP;
         config->port = 10301;
         config->server = "127.0.0.1";
         config->pass_set = -1;
         config->pool = pool;
+        config->show_rule_ids = -1;
     }
 
     return config;
@@ -537,10 +534,22 @@ static void *merge_redirectionio_dir_conf(apr_pool_t *pool, void *parent, void *
         conf->enable_logs = conf_current->enable_logs;
     }
 
+    if (conf_current->show_rule_ids == -1) {
+        conf->show_rule_ids = conf_parent->show_rule_ids;
+    } else {
+        conf->show_rule_ids = conf_current->show_rule_ids;
+    }
+
     if (conf_current->project_key == NULL) {
         conf->project_key = conf_parent->project_key;
     } else {
         conf->project_key = conf_current->project_key;
+    }
+
+    if (conf_current->scheme == NULL) {
+        conf->scheme = conf_parent->scheme;
+    } else {
+        conf->scheme = conf_current->scheme;
     }
 
     if (conf_current->pass_set == -1) {
@@ -621,6 +630,10 @@ static const char *redirectionio_set_enable(cmd_parms *cmd, void *cfg, const cha
             if (conf->enable_logs == -1) {
                 conf->enable_logs = 1;
             }
+
+            if (conf->show_rule_ids == -1) {
+                conf->show_rule_ids = 0;
+            }
         } else {
             conf->enable = 0;
         }
@@ -647,6 +660,16 @@ static const char *redirectionio_set_project_key(cmd_parms *cmd, void *cfg, cons
     return NULL;
 }
 
+static const char *redirectionio_set_scheme(cmd_parms *cmd, void *cfg, const char *arg) {
+    redirectionio_config *conf = (redirectionio_config*)cfg;
+
+    if (conf) {
+        conf->scheme = arg;
+    }
+
+    return NULL;
+}
+
 static const char *redirectionio_set_logs_enable(cmd_parms *cmd, void *cfg, const char *arg) {
     redirectionio_config *conf = (redirectionio_config*)cfg;
 
@@ -655,6 +678,20 @@ static const char *redirectionio_set_logs_enable(cmd_parms *cmd, void *cfg, cons
             conf->enable_logs = 1;
         } else {
             conf->enable_logs = 0;
+        }
+    }
+
+    return NULL;
+}
+
+static const char *redirectionio_set_show_rule_ids(cmd_parms *cmd, void *cfg, const char *arg) {
+    redirectionio_config *conf = (redirectionio_config*)cfg;
+
+    if (conf) {
+        if(!strcasecmp(arg, "on")) {
+            conf->show_rule_ids = 1;
+        } else {
+            conf->show_rule_ids = 0;
         }
     }
 

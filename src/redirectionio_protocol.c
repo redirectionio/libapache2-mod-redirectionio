@@ -36,6 +36,7 @@ apr_status_t redirectionio_protocol_match(redirectionio_connection *conn, redire
     const apr_array_header_t        *tarr = apr_table_elts(r->headers_in);
     const apr_table_entry_t         *telts = (const apr_table_entry_t*)tarr->elts;
     int                             i;
+    redirectionio_config            *config = (redirectionio_config*) ap_get_module_config(r->per_dir_config, &redirectionio_module);
 
     // Create request header map
     for (i = 0; i < tarr->nelts; i++) {
@@ -53,7 +54,12 @@ apr_status_t redirectionio_protocol_match(redirectionio_connection *conn, redire
     }
 
     // Create redirection io request
-    scheme = r->parsed_uri.scheme ? r->parsed_uri.scheme : ap_http_scheme(r);
+    scheme = config->scheme;
+
+    if (scheme == NULL) {
+        scheme = r->parsed_uri.scheme ? r->parsed_uri.scheme : ap_http_scheme(r);
+    }
+
     ctx->request = (struct REDIRECTIONIO_Request *)redirectionio_request_create(r->unparsed_uri, r->hostname, scheme, r->method, first_header);
 
     if (ctx->request == NULL) {
@@ -182,6 +188,7 @@ apr_status_t redirectionio_protocol_send_filter_headers(redirectionio_context *c
     int                             i;
     char                            *name_str, *value_str;
     struct REDIRECTIONIO_HeaderMap  *first_header = NULL, *current_header = NULL;
+    redirectionio_config            *config = (redirectionio_config*) ap_get_module_config(r->per_dir_config, &redirectionio_module);
 
     // Create request header map
     for (i = 0; i < tarr->nelts; i++) {
@@ -198,7 +205,7 @@ apr_status_t redirectionio_protocol_send_filter_headers(redirectionio_context *c
         first_header = current_header;
     }
 
-    first_header = (struct REDIRECTIONIO_HeaderMap *)redirectionio_action_header_filter_filter(ctx->action, first_header, r->status);
+    first_header = (struct REDIRECTIONIO_HeaderMap *)redirectionio_action_header_filter_filter(ctx->action, first_header, r->status, config->show_rule_ids == 1);
     ctx->response_headers = first_header;
 
     // Even if error returns success, as it does not affect anything
