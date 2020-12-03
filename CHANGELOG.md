@@ -1,6 +1,9 @@
-## Unreleased
+## 2.0.0 - Unreleased
 
  * Send proxy version in logs
+ * Send content type in logs
+ * Use 2.0.0 version of libredirection: more matching and actions availables
+ * [BC BREAK] Use new agent protocol (only compatible with agent in 2.0 or more)
 
 ## 0.3.2 - 25-02-2019
 
