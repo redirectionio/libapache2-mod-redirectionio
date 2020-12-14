@@ -269,7 +269,7 @@ static apr_status_t redirectionio_filter_body_filtering(ap_filter_t *f, apr_buck
         rv = apr_bucket_read(b, &input, (apr_size_t *)&input_size, APR_BLOCK_READ);
 
         if (rv != APR_SUCCESS) {
-            redirectionio_action_body_filter_close(ctx->body_filter);
+            redirectionio_action_body_filter_drop(ctx->body_filter);
             ctx->body_filter = NULL;
             ap_remove_output_filter(f);
 
@@ -280,7 +280,10 @@ static apr_status_t redirectionio_filter_body_filtering(ap_filter_t *f, apr_buck
         if (input_size > 0) {
             input_str = strndup(input, input_size);
             output = redirectionio_action_body_filter_filter(ctx->body_filter, input_str);
-            free((char *)input_str);
+
+            if (output != input_str) {
+                free((char *)input_str);
+            }
 
             if (output == NULL) {
                 ap_remove_output_filter(f);
