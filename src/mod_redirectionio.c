@@ -67,9 +67,9 @@ static void redirectionio_register_hooks(apr_pool_t *p) {
     ap_hook_insert_filter(ap_headers_insert_output_filter, NULL, NULL, APR_HOOK_LAST);
     ap_hook_insert_error_filter(ap_headers_insert_output_filter, NULL, NULL, APR_HOOK_LAST);
 
-    ap_register_output_filter("redirectionio_redirect_filter", redirectionio_filter_match_on_response, NULL, AP_FTYPE_CONTENT_SET);
-    ap_register_output_filter("redirectionio_header_filter", redirectionio_filter_header_filtering, NULL, AP_FTYPE_CONTENT_SET);
-    ap_register_output_filter("redirectionio_body_filter", redirectionio_filter_body_filtering, NULL, AP_FTYPE_CONTENT_SET);
+    ap_register_output_filter("REDIRECTIONIO_REDIRECT_FILTER", redirectionio_filter_match_on_response, NULL, AP_FTYPE_CONTENT_SET - 1);
+    ap_register_output_filter("REDIRECTIONIO_HEADER_FILTER", redirectionio_filter_header_filtering, NULL, AP_FTYPE_CONTENT_SET - 1);
+    ap_register_output_filter("REDIRECTIONIO_BODY_FILTER", redirectionio_filter_body_filtering, NULL, AP_FTYPE_CONTENT_SET - 1);
 }
 
 static int redirectionio_match_handler(request_rec *r) {
@@ -161,9 +161,9 @@ static void ap_headers_insert_output_filter(request_rec *r) {
         return;
     }
 
-    ap_add_output_filter("redirectionio_redirect_filter", ctx, r, r->connection);
-    ap_add_output_filter("redirectionio_header_filter", ctx, r, r->connection);
-    ap_add_output_filter("redirectionio_body_filter", ctx, r, r->connection);
+    ap_add_output_filter("REDIRECTIONIO_REDIRECT_FILTER", ctx, r, r->connection);
+    ap_add_output_filter("REDIRECTIONIO_HEADER_FILTER", ctx, r, r->connection);
+    ap_add_output_filter("REDIRECTIONIO_BODY_FILTER", ctx, r, r->connection);
 }
 
 static int redirectionio_redirect_handler_for_status_code(request_rec *r, uint16_t status_code) {
