@@ -228,12 +228,12 @@ static apr_status_t redirectionio_filter_header_filtering(ap_filter_t *f, apr_bu
 }
 
 static apr_status_t redirectionio_filter_body_filtering(ap_filter_t *f, apr_bucket_brigade *bb) {
-    redirectionio_context   *ctx = (redirectionio_context *)f->ctx;
-    apr_bucket              *b, *b_new;
-    apr_bucket_brigade      *bb_new;
-    const char              *input, *output, *input_str;
-    int64_t                 input_size, output_size;
-    apr_status_t            rv;
+    redirectionio_context       *ctx = (redirectionio_context *)f->ctx;
+    apr_bucket                  *b, *b_new;
+    apr_bucket_brigade          *bb_new;
+    const char                  *input_bucket;
+    struct REDIRECTIONIO_Buffer input, output;
+    apr_status_t                rv;
 
     if (ctx == NULL) {
         return ap_pass_brigade(f->next, bb);
@@ -266,7 +266,7 @@ static apr_status_t redirectionio_filter_body_filtering(ap_filter_t *f, apr_buck
     // filter brigade
     while (b != APR_BRIGADE_SENTINEL(bb)) {
         // Read bucket
-        rv = apr_bucket_read(b, &input, (apr_size_t *)&input_size, APR_BLOCK_READ);
+        rv = apr_bucket_read(b, &input_bucket, (apr_size_t *)&input.len, APR_BLOCK_READ);
 
         if (rv != APR_SUCCESS) {
             redirectionio_action_body_filter_drop(ctx->body_filter);
@@ -276,26 +276,16 @@ static apr_status_t redirectionio_filter_body_filtering(ap_filter_t *f, apr_buck
             return ap_pass_brigade(f->next, bb);
         }
 
+        input.data = malloc(input.len);
+        memcpy(input.data, input_bucket, input.len);
+
         // Send bucket
-        if (input_size > 0) {
-            input_str = strndup(input, input_size);
-            output = redirectionio_action_body_filter_filter(ctx->body_filter, input_str);
-
-            if (output != input_str) {
-                free((char *)input_str);
-            }
-
-            if (output == NULL) {
-                ap_remove_output_filter(f);
-
-                return ap_pass_brigade(f->next, bb);
-            }
-
-            output_size = strlen(output);
+        if (input.len > 0) {
+            output = redirectionio_action_body_filter_filter(ctx->body_filter, input);
 
             // Create a new one
-            if (output_size > 0) {
-                b_new = apr_bucket_transient_create(output, output_size, f->r->connection->bucket_alloc);
+            if (output.len > 0) {
+                b_new = apr_bucket_transient_create((const char *)output.data, output.len, f->r->connection->bucket_alloc);
 
                 if (b_new == NULL) {
                     ap_remove_output_filter(f);
@@ -311,17 +301,9 @@ static apr_status_t redirectionio_filter_body_filtering(ap_filter_t *f, apr_buck
         if (APR_BUCKET_IS_EOS(b)) {
             output = redirectionio_action_body_filter_close(ctx->body_filter);
 
-            if (output == NULL) {
-                ap_remove_output_filter(f);
-
-                return ap_pass_brigade(f->next, bb);
-            }
-
-            output_size = strlen(output);
-
-            if (output_size > 0) {
+            if (output.len > 0) {
                 // Create a new one
-                b_new = apr_bucket_transient_create(output, output_size, f->r->connection->bucket_alloc);
+                b_new = apr_bucket_transient_create((const char *)output.data, output.len, f->r->connection->bucket_alloc);
 
                 if (b_new == NULL) {
                     ap_remove_output_filter(f);
