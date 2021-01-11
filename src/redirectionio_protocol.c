@@ -159,6 +159,8 @@ apr_status_t redirectionio_protocol_log(redirectionio_connection *conn, redirect
     rv = redirectionio_send_protocol_header(conn, project_key, REDIRECTIONIO_PROTOCOL_COMMAND_LOG, r);
 
     if (rv != APR_SUCCESS) {
+        free((char *)log);
+
         return rv;
     }
 
@@ -167,6 +169,7 @@ apr_status_t redirectionio_protocol_log(redirectionio_connection *conn, redirect
 
     if (rv != APR_SUCCESS) {
         ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, "mod_redirectionio: Error sending log command length: %s", apr_strerror(rv, errbuf, sizeof(errbuf)));
+        free((char *)log);
 
         return rv;
     }
@@ -175,9 +178,12 @@ apr_status_t redirectionio_protocol_log(redirectionio_connection *conn, redirect
 
     if (rv != APR_SUCCESS) {
         ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, "mod_redirectionio: Error sending log command data: %s", apr_strerror(rv, errbuf, sizeof(errbuf)));
+        free((char *)log);
 
         return rv;
     }
+
+    free((char *)log);
 
     return APR_SUCCESS;
 }

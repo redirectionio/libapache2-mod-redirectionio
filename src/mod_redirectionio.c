@@ -276,11 +276,11 @@ static apr_status_t redirectionio_filter_body_filtering(ap_filter_t *f, apr_buck
             return ap_pass_brigade(f->next, bb);
         }
 
-        input.data = malloc(input.len);
-        memcpy(input.data, input_bucket, input.len);
-
         // Send bucket
         if (input.len > 0) {
+            input.data = malloc(input.len);
+            memcpy(input.data, input_bucket, input.len);
+
             output = redirectionio_action_body_filter_filter(ctx->body_filter, input);
 
             // Create a new one
