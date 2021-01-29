@@ -61,7 +61,7 @@ static void redirectionio_register_hooks(apr_pool_t *p) {
     ap_hook_type_checker(redirectionio_match_handler, NULL, NULL, APR_HOOK_FIRST);
     ap_hook_fixups(redirectionio_match_handler, NULL, NULL, APR_HOOK_FIRST);
 
-    ap_hook_handler(redirectionio_redirect_handler, NULL, NULL, APR_HOOK_FIRST);
+    ap_hook_handler(redirectionio_redirect_handler, NULL, NULL, APR_HOOK_REALLY_FIRST);
     ap_hook_log_transaction(redirectionio_log_handler, NULL, NULL, APR_HOOK_MIDDLE);
 
     ap_hook_insert_filter(ap_headers_insert_output_filter, NULL, NULL, APR_HOOK_LAST);
@@ -193,6 +193,11 @@ static int redirectionio_redirect_handler_for_status_code(request_rec *r, uint16
     }
 
     r->status = new_status_code;
+
+    if (status_code == 0) {
+        r->handler = "redirectionio";
+        r->filename = "redirectionio";
+    }
 
     return r->status;
 }
