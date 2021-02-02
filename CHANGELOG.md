@@ -1,3 +1,8 @@
+## 2.1.0 - 02-02-2021
+
+ * Pass the client IP address to the agent
+ * Better management of possible module conflicts
+
 ## 2.0.0 - 11-01-2021
 
  * Send proxy version in logs
