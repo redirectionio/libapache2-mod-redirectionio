@@ -34,7 +34,7 @@
 #define STRINGIZE(x) #x
 #define PROXY_VERSION_STR(x) STRINGIZE(x)
 
-#define RIO_TIMEOUT 100000 // Timeout in microseconds
+#define RIO_TIMEOUT 100 // Timeout in microseconds
 #define RIO_RECONNECT_INTERVAL 0
 #define RIO_MIN_CONNECTIONS 1
 #define RIO_KEEP_CONNECTIONS 10
@@ -42,17 +42,25 @@
 #define RIO_SEND_BUFFER 1048576
 
 typedef struct {
-    const char*     project_key;
-    const char*     scheme;
-    char*           server;
-    int             port;
-    int             protocol;
-    int             enable;
-    int             enable_logs;
-    int             pass_set;
-    int             show_rule_ids;
-    apr_reslist_t   *connection_pool;
-    apr_pool_t      *pool;
+    char*                   pass;
+    int                     port;
+    int                     protocol;
+    int                     min_conns;
+    int                     max_conns;
+    int                     keep_conns;
+    apr_interval_time_t     timeout;
+    int                     pass_set;
+} redirectionio_server;
+
+typedef struct {
+    const char*             project_key;
+    const char*             scheme;
+    redirectionio_server    server;
+    int                     enable;
+    int                     enable_logs;
+    int                     show_rule_ids;
+    apr_reslist_t           *connection_pool;
+    apr_pool_t              *pool;
 } redirectionio_config;
 
 typedef struct {

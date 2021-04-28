@@ -34,12 +34,13 @@ static const char *redirectionio_set_project_key(cmd_parms *cmd, void *cfg, cons
 static const char *redirectionio_set_logs_enable(cmd_parms *cmd, void *cfg, const char *arg);
 static const char *redirectionio_set_scheme(cmd_parms *cmd, void *cfg, const char *arg);
 static const char *redirectionio_set_show_rule_ids(cmd_parms *cmd, void *cfg, const char *arg);
-static const char *redirectionio_set_pass(cmd_parms *cmd, void *cfg, const char *arg);
+static const char *redirectionio_set_server(cmd_parms *cmd, void *dc, int argc, char *const argv[]);
 static void redirectionio_apache_log_callback(const char* log_str, const void* data, short level);
+static apr_status_t redirectionio_atoi(const char *line, apr_size_t len);
 
 static const command_rec redirectionio_directives[] = {
     AP_INIT_TAKE1("redirectionio", redirectionio_set_enable, NULL, OR_ALL, "Enable or disable redirectionio"),
-    AP_INIT_TAKE1("redirectionioPass", redirectionio_set_pass, NULL, OR_ALL, "Agent server location"),
+    AP_INIT_TAKE_ARGV("redirectionioPass", redirectionio_set_server, NULL, OR_ALL, "Agent server location"),
     AP_INIT_TAKE1("redirectionioProjectKey", redirectionio_set_project_key, NULL, OR_ALL, "RedirectionIO project key"),
     AP_INIT_TAKE1("redirectionioLogs", redirectionio_set_logs_enable, NULL, OR_ALL, "Enable or disable logging for redirectionio"),
     AP_INIT_TAKE1("redirectionioScheme", redirectionio_set_scheme, NULL, OR_ALL, "Force scheme to use when matching request"),
@@ -87,9 +88,9 @@ static int redirectionio_match_handler(request_rec *r) {
     if (config->connection_pool == NULL) {
         if (apr_reslist_create(
             &config->connection_pool,
-            RIO_MIN_CONNECTIONS,
-            RIO_KEEP_CONNECTIONS,
-            RIO_MAX_CONNECTIONS,
+            config->server.min_conns,
+            config->server.keep_conns,
+            config->server.max_conns,
             0,
             redirectionio_pool_construct,
             redirectionio_pool_destruct,
@@ -103,7 +104,7 @@ static int redirectionio_match_handler(request_rec *r) {
             return DECLINED;
         }
 
-        apr_reslist_timeout_set(config->connection_pool, RIO_TIMEOUT);
+        apr_reslist_timeout_set(config->connection_pool, config->server.timeout * 1000);
         apr_pool_cleanup_register(config->pool, config->connection_pool, redirectionio_child_exit, redirectionio_child_exit);
     }
 
@@ -386,14 +387,14 @@ static apr_status_t redirectionio_create_connection(redirectionio_connection *co
     apr_status_t    rv;
     apr_int32_t     family = APR_INET;
 
-    if (config->protocol == UNIX) {
+    if (config->server.protocol == UNIX) {
         family = APR_UNIX;
     }
 
-    rv = apr_sockaddr_info_get(&conn->rio_addr, config->server, family, config->port, 0, pool);
+    rv = apr_sockaddr_info_get(&conn->rio_addr, config->server.pass, family, config->server.port, 0, pool);
 
     if (rv != APR_SUCCESS) {
-        ap_log_perror(APLOG_MARK, APLOG_ERR, 0, pool, "mod_redirectionio: apr_sockaddr_info_get failed %s:%d %s", config->server, config->port, apr_strerror(rv, errbuf, sizeof(errbuf)));
+        ap_log_perror(APLOG_MARK, APLOG_ERR, 0, pool, "mod_redirectionio: apr_sockaddr_info_get failed %s:%d %s", config->server.pass, config->server.port, apr_strerror(rv, errbuf, sizeof(errbuf)));
 
         return rv;
     }
@@ -439,7 +440,7 @@ static apr_status_t redirectionio_create_connection(redirectionio_connection *co
         return rv;
     }
 
-    rv = apr_socket_timeout_set(conn->rio_sock, RIO_TIMEOUT);
+    rv = apr_socket_timeout_set(conn->rio_sock, config->server.timeout * 1000);
 
     if (rv != APR_SUCCESS) {
         ap_log_perror(APLOG_MARK, APLOG_ERR, 0, pool, "mod_redirectionio: Error setting socket timeout: %s", apr_strerror(rv, errbuf, sizeof(errbuf)));
@@ -495,10 +496,14 @@ static void *create_redirectionio_dir_conf(apr_pool_t *pool, char *context) {
         config->enable_logs = -1;
         config->project_key = NULL;
         config->scheme = NULL;
-        config->protocol = TCP;
-        config->port = 10301;
-        config->server = "127.0.0.1";
-        config->pass_set = -1;
+        config->server.protocol = TCP;
+        config->server.pass = "127.0.0.1";
+        config->server.pass_set = -1;
+        config->server.port = 10301;
+        config->server.min_conns = RIO_MIN_CONNECTIONS;
+        config->server.max_conns = RIO_MAX_CONNECTIONS;
+        config->server.keep_conns = RIO_KEEP_CONNECTIONS;
+        config->server.timeout = RIO_TIMEOUT;
         config->pool = pool;
         config->show_rule_ids = -1;
     }
@@ -542,16 +547,24 @@ static void *merge_redirectionio_dir_conf(apr_pool_t *pool, void *parent, void *
         conf->scheme = conf_current->scheme;
     }
 
-    if (conf_current->pass_set == -1) {
-        conf->port = conf_parent->port;
-        conf->protocol = conf_parent->protocol;
-        conf->server = conf_parent->server;
-        conf->pass_set = conf_parent->pass_set;
+    if (conf_current->server.pass_set == -1) {
+        conf->server.port = conf_parent->server.port;
+        conf->server.protocol = conf_parent->server.protocol;
+        conf->server.pass = conf_parent->server.pass;
+        conf->server.pass_set = conf_parent->server.pass_set;
+        conf->server.min_conns = conf_parent->server.min_conns;
+        conf->server.max_conns = conf_parent->server.max_conns;
+        conf->server.keep_conns = conf_parent->server.keep_conns;
+        conf->server.timeout = conf_parent->server.timeout;
     } else {
-        conf->port = conf_current->port;
-        conf->protocol = conf_current->protocol;
-        conf->server = conf_current->server;
-        conf->pass_set = conf_current->pass_set;
+        conf->server.port = conf_current->server.port;
+        conf->server.protocol = conf_current->server.protocol;
+        conf->server.pass = conf_current->server.pass;
+        conf->server.pass_set = conf_current->server.pass_set;
+        conf->server.min_conns = conf_current->server.min_conns;
+        conf->server.max_conns = conf_current->server.max_conns;
+        conf->server.keep_conns = conf_current->server.keep_conns;
+        conf->server.timeout = conf_current->server.timeout;
     }
 
     conf->pool = pool;
@@ -688,43 +701,107 @@ static const char *redirectionio_set_show_rule_ids(cmd_parms *cmd, void *cfg, co
     return NULL;
 }
 
-static const char *redirectionio_set_pass(cmd_parms *cmd, void *cfg, const char *arg) {
+static const char *redirectionio_set_server(cmd_parms *cmd, void *cfg, int argc, char *const argv[]) {
     apr_uri_t               uri;
     redirectionio_config    *conf = (redirectionio_config*)cfg;
+    const char              *server_pass;
+    int                     i;
+    size_t                  arg_len;
 
-    if (apr_uri_parse(cmd->pool, arg, &uri) != APR_SUCCESS) {
-        ap_log_error(APLOG_MARK, APLOG_ERR, 0, NULL, "mod_redirectionio: Could not parse agent url %s, disable module.", arg);
+    if (argc < 1) {
+        ap_log_error(APLOG_MARK, APLOG_ERR, 0, NULL, "mod_redirectionio: Could not parse agent server, no parameter, disable module.");
         conf->enable = 0;
 
         return NULL;
     }
 
-    conf->pass_set = 1;
+    server_pass = argv[0];
+
+    if (apr_uri_parse(cmd->pool, server_pass, &uri) != APR_SUCCESS) {
+        ap_log_error(APLOG_MARK, APLOG_ERR, 0, NULL, "mod_redirectionio: Could not parse agent url %s, disable module.", server_pass);
+        conf->enable = 0;
+
+        return NULL;
+    }
+
+    conf->server.pass_set = 1;
 
     if (uri.scheme != NULL && apr_strnatcmp(uri.scheme, "unix") == 0) {
-        conf->protocol = UNIX;
+        conf->server.protocol = UNIX;
     }
 
     if (uri.scheme != NULL && apr_strnatcmp(uri.scheme, "tcp") == 0) {
-        conf->protocol = TCP;
+        conf->server.protocol = TCP;
     }
 
-    if (conf->protocol != UNIX && conf->protocol != TCP) {
+    if (conf->server.protocol != UNIX && conf->server.protocol != TCP) {
         ap_log_error(APLOG_MARK, APLOG_ERR, 0, NULL, "mod_redirectionio: Server protocol is %s, but must be 'unix://' or 'tcp://', disable module.", uri.scheme);
         conf->enable = 0;
     }
 
-    if (conf->protocol == UNIX && uri.path) {
-        conf->server = uri.path;
+    if (conf->server.protocol == UNIX && uri.path) {
+        conf->server.pass = uri.path;
     }
 
-    if (conf->protocol == TCP && uri.hostname) {
-        conf->server = uri.hostname;
+    if (conf->server.protocol == TCP && uri.hostname) {
+        conf->server.pass = uri.hostname;
     }
 
     if (uri.port) {
-        conf->port = uri.port;
+        conf->server.port = uri.port;
     }
+
+    for (i = 1; i < argc; i++) {
+        arg_len = strlen(argv[i]);
+
+        if (strncasecmp(argv[i], "min_conns=", 10) == 0) {
+            conf->server.min_conns = redirectionio_atoi(&argv[i][10], arg_len - 10);
+
+            if (conf->server.min_conns == APR_EGENERAL) {
+                goto invalid;
+            }
+
+            continue;
+        }
+
+        if (strncasecmp(argv[i], "max_conns=", 10) == 0) {
+            conf->server.max_conns = redirectionio_atoi(&argv[i][10], arg_len - 10);
+
+            if (conf->server.max_conns == APR_EGENERAL) {
+                goto invalid;
+            }
+
+            continue;
+        }
+
+        if (strncasecmp(argv[i], "keep_conns=", 11) == 0) {
+            conf->server.keep_conns = redirectionio_atoi(&argv[i][11], arg_len - 11);
+
+            if (conf->server.keep_conns == APR_EGENERAL) {
+                goto invalid;
+            }
+
+            continue;
+        }
+
+        if (strncasecmp(argv[i], "timeout=", 8) == 0) {
+            conf->server.timeout = (apr_interval_time_t) redirectionio_atoi(&argv[i][8], arg_len - 8);
+
+            if (conf->server.timeout == (apr_interval_time_t) APR_EGENERAL) {
+                goto invalid;
+            }
+
+            continue;
+        }
+
+        goto invalid;
+    }
+
+    return NULL;
+
+invalid:
+    ap_log_error(APLOG_MARK, APLOG_ERR, 0, NULL, "mod_redirectionio: invalid parameter when setting pass: %s.", argv[i]);
+    conf->enable = 0;
 
     return NULL;
 }
@@ -733,4 +810,29 @@ static void redirectionio_apache_log_callback(const char* log_str, const void* d
     if (level <= 1) {
         ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, (request_rec *)data, "mod_redirectionio api error: %s", log_str);
     }
+}
+
+static apr_status_t redirectionio_atoi(const char *line, apr_size_t len) {
+    int     value, cutoff, cutlim;
+
+    if (len == 0) {
+        return APR_EGENERAL;
+    }
+
+    cutoff = INT_MAX / 10;
+    cutlim = INT_MAX % 10;
+
+    for (value = 0; len--; line++) {
+        if (*line < '0' || *line > '9') {
+            return APR_EGENERAL;
+        }
+
+        if (value >= cutoff && (value > cutoff || *line - '0' > cutlim)) {
+            return APR_EGENERAL;
+        }
+
+        value = value * 10 + (*line - '0');
+    }
+
+    return value;
 }
