@@ -33,12 +33,16 @@ apr_status_t redirectionio_protocol_match(redirectionio_connection *conn, redire
     struct REDIRECTIONIO_HeaderMap  *first_header = NULL, *current_header = NULL;
     const char                      *request_serialized, *scheme;
     char                            *action_serialized;
-    const apr_array_header_t        *tarr = apr_table_elts(r->headers_in);
-    const apr_table_entry_t         *telts = (const apr_table_entry_t*)tarr->elts;
+    const apr_array_header_t        *tarr;
+    const apr_table_entry_t         *telts;
     int                             i;
     redirectionio_config            *config = (redirectionio_config*) ap_get_module_config(r->per_dir_config, &redirectionio_module);
 
     // Create request header map
+    // First header from request
+    tarr = apr_table_elts(r->headers_in);
+    telts = (const apr_table_entry_t*)tarr->elts;
+
     for (i = 0; i < tarr->nelts; i++) {
         current_header = (struct REDIRECTIONIO_HeaderMap *) apr_palloc(r->pool, sizeof(struct REDIRECTIONIO_HeaderMap));
 
@@ -51,6 +55,26 @@ apr_status_t redirectionio_protocol_match(redirectionio_connection *conn, redire
         current_header->next = first_header;
 
         first_header = current_header;
+    }
+
+    // Then header from config
+    if (config->headers_set != NULL) {
+        tarr = apr_table_elts(config->headers_set);
+        telts = (const apr_table_entry_t*)tarr->elts;
+
+        for (i = 0; i < tarr->nelts; i++) {
+            current_header = (struct REDIRECTIONIO_HeaderMap *) apr_palloc(r->pool, sizeof(struct REDIRECTIONIO_HeaderMap));
+
+            if (current_header == NULL) {
+                return APR_EGENERAL;
+            }
+
+            current_header->name = (const char *)telts[i].key;
+            current_header->value = (const char *)telts[i].val;
+            current_header->next = first_header;
+
+            first_header = current_header;
+        }
     }
 
     // Create redirection io request

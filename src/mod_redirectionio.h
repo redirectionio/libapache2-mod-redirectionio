@@ -61,6 +61,7 @@ typedef struct {
     int                     show_rule_ids;
     apr_reslist_t           *connection_pool;
     apr_pool_t              *pool;
+    apr_table_t             *headers_set;
 } redirectionio_config;
 
 typedef struct {

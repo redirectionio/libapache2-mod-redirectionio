@@ -35,6 +35,7 @@ static const char *redirectionio_set_logs_enable(cmd_parms *cmd, void *cfg, cons
 static const char *redirectionio_set_scheme(cmd_parms *cmd, void *cfg, const char *arg);
 static const char *redirectionio_set_show_rule_ids(cmd_parms *cmd, void *cfg, const char *arg);
 static const char *redirectionio_set_server(cmd_parms *cmd, void *dc, int argc, char *const argv[]);
+static const char *redirectionio_set_header(cmd_parms *cmd, void *cfg, const char *arg1, const char *arg2);
 static void redirectionio_apache_log_callback(const char* log_str, const void* data, short level);
 static apr_status_t redirectionio_atoi(const char *line, apr_size_t len);
 
@@ -45,6 +46,7 @@ static const command_rec redirectionio_directives[] = {
     AP_INIT_TAKE1("redirectionioLogs", redirectionio_set_logs_enable, NULL, OR_ALL, "Enable or disable logging for redirectionio"),
     AP_INIT_TAKE1("redirectionioScheme", redirectionio_set_scheme, NULL, OR_ALL, "Force scheme to use when matching request"),
     AP_INIT_TAKE1("redirectionioRuleIdsHeader", redirectionio_set_show_rule_ids, NULL, OR_ALL, "Show rule ids used on response header"),
+    AP_INIT_TAKE2("redirectionioSetHeader", redirectionio_set_header, NULL, OR_ALL, "Add header to match in redirectionio request"),
     { NULL }
 };
 
@@ -506,6 +508,7 @@ static void *create_redirectionio_dir_conf(apr_pool_t *pool, char *context) {
         config->server.timeout = RIO_TIMEOUT;
         config->pool = pool;
         config->show_rule_ids = -1;
+        config->headers_set = NULL;
     }
 
     return config;
@@ -521,6 +524,14 @@ static void *merge_redirectionio_dir_conf(apr_pool_t *pool, void *parent, void *
         conf->enable = conf_parent->enable;
     } else {
         conf->enable = conf_current->enable;
+    }
+
+    if (conf_current->headers_set == NULL) {
+        conf->headers_set = conf_parent->headers_set;
+    } else if (conf_parent->headers_set == NULL) {
+        conf->headers_set = conf_current->headers_set;
+    } else {
+        conf->headers_set = apr_table_overlay(pool, conf_current->headers_set, conf_parent->headers_set);
     }
 
     if (conf_current->enable_logs == -1) {
@@ -802,6 +813,18 @@ static const char *redirectionio_set_server(cmd_parms *cmd, void *cfg, int argc,
 invalid:
     ap_log_error(APLOG_MARK, APLOG_ERR, 0, NULL, "mod_redirectionio: invalid parameter when setting pass: %s.", argv[i]);
     conf->enable = 0;
+
+    return NULL;
+}
+
+static const char *redirectionio_set_header(cmd_parms *cmd, void *cfg, const char *arg1, const char *arg2) {
+    redirectionio_config *conf = (redirectionio_config*)cfg;
+
+    if (conf->headers_set == NULL) {
+        conf->headers_set = apr_table_make(conf->pool, 10);
+    }
+
+    apr_table_set(conf->headers_set, arg1, arg2);
 
     return NULL;
 }
