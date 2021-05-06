@@ -1,3 +1,8 @@
+## 2.2.0 - 06-05-2021
+
+ * added the `RedirectionioSetHeader` directive - ([see the documentation](https://redirection.io/documentation/developer-documentation/apache-module#redirectioniosetheader))
+ * added connection pool management options to the `RedirectionioPass` directive: `min_conns`, `keep_conns`, `max_conns` and `timeout` - ([see the documentation](https://redirection.io/documentation/developer-documentation/apache-module#redirectioniopass))
+
 ## 2.1.0 - 02-02-2021
 
  * Pass the client IP address to the agent
