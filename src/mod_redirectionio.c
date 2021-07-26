@@ -36,6 +36,7 @@ static const char *redirectionio_set_scheme(cmd_parms *cmd, void *cfg, const cha
 static const char *redirectionio_set_show_rule_ids(cmd_parms *cmd, void *cfg, const char *arg);
 static const char *redirectionio_set_server(cmd_parms *cmd, void *dc, int argc, char *const argv[]);
 static const char *redirectionio_set_header(cmd_parms *cmd, void *cfg, const char *arg1, const char *arg2);
+static const char *redirectionio_set_trusted_proxies(cmd_parms *cmd, void *cfg, const char *arg);
 static void redirectionio_apache_log_callback(const char* log_str, const void* data, short level);
 static apr_status_t redirectionio_atoi(const char *line, apr_size_t len);
 
@@ -47,6 +48,7 @@ static const command_rec redirectionio_directives[] = {
     AP_INIT_TAKE1("redirectionioScheme", redirectionio_set_scheme, NULL, OR_ALL, "Force scheme to use when matching request"),
     AP_INIT_TAKE1("redirectionioRuleIdsHeader", redirectionio_set_show_rule_ids, NULL, OR_ALL, "Show rule ids used on response header"),
     AP_INIT_TAKE2("redirectionioSetHeader", redirectionio_set_header, NULL, OR_ALL, "Add header to match in redirectionio request"),
+    AP_INIT_TAKE1("redirectionioTrustedProxies", redirectionio_set_trusted_proxies, NULL, OR_ALL, "Trusted proxies to filter client ip"),
     { NULL }
 };
 
@@ -509,6 +511,7 @@ static void *create_redirectionio_dir_conf(apr_pool_t *pool, char *context) {
         config->pool = pool;
         config->show_rule_ids = -1;
         config->headers_set = NULL;
+        config->trusted_proxies = NULL;
     }
 
     return config;
@@ -576,6 +579,12 @@ static void *merge_redirectionio_dir_conf(apr_pool_t *pool, void *parent, void *
         conf->server.max_conns = conf_current->server.max_conns;
         conf->server.keep_conns = conf_current->server.keep_conns;
         conf->server.timeout = conf_current->server.timeout;
+    }
+
+    if (conf_current->trusted_proxies == NULL) {
+        conf->trusted_proxies = conf_parent->trusted_proxies;
+    } else {
+        conf->trusted_proxies = conf_current->trusted_proxies;
     }
 
     conf->pool = pool;
@@ -825,6 +834,16 @@ static const char *redirectionio_set_header(cmd_parms *cmd, void *cfg, const cha
     }
 
     apr_table_set(conf->headers_set, arg1, arg2);
+
+    return NULL;
+}
+
+static const char *redirectionio_set_trusted_proxies(cmd_parms *cmd, void *cfg, const char *arg) {
+    redirectionio_config *conf = (redirectionio_config*)cfg;
+
+    if (conf) {
+        conf->trusted_proxies = (struct REDIRECTIONIO_TrustedProxies *) redirectionio_trusted_proxies_create(arg);
+    }
 
     return NULL;
 }

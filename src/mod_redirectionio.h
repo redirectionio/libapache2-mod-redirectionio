@@ -53,15 +53,16 @@ typedef struct {
 } redirectionio_server;
 
 typedef struct {
-    const char*             project_key;
-    const char*             scheme;
-    redirectionio_server    server;
-    int                     enable;
-    int                     enable_logs;
-    int                     show_rule_ids;
-    apr_reslist_t           *connection_pool;
-    apr_pool_t              *pool;
-    apr_table_t             *headers_set;
+    const char*                         project_key;
+    const char*                         scheme;
+    redirectionio_server                server;
+    int                                 enable;
+    int                                 enable_logs;
+    int                                 show_rule_ids;
+    apr_reslist_t                       *connection_pool;
+    apr_pool_t                          *pool;
+    apr_table_t                         *headers_set;
+    struct REDIRECTIONIO_TrustedProxies *trusted_proxies;
 } redirectionio_config;
 
 typedef struct {

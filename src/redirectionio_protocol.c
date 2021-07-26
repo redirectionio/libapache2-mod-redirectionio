@@ -90,6 +90,8 @@ apr_status_t redirectionio_protocol_match(redirectionio_connection *conn, redire
         return APR_EGENERAL;
     }
 
+    redirectionio_request_set_remote_addr(ctx->request, r->connection->client_ip, config->trusted_proxies);
+
     apr_pool_pre_cleanup_register(r->pool, ctx->request, redirectionio_request_cleanup);
 
     // Serialize request
