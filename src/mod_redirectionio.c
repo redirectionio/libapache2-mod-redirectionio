@@ -354,19 +354,28 @@ static apr_status_t redirectionio_filter_body_filtering(ap_filter_t *f, apr_buck
 }
 
 static int redirectionio_log_handler(request_rec *r) {
+    bool                 should_log;
     redirectionio_config *config = (redirectionio_config*) ap_get_module_config(r->per_dir_config, &redirectionio_module);
+    request_rec          *response = r;
 
     if (config->enable != 1) {
-        return DECLINED;
-    }
-
-    if (config->enable_logs != 1) {
         return DECLINED;
     }
 
     redirectionio_context* context = ap_get_module_config(r->request_config, &redirectionio_module);
 
     if (context == NULL) {
+        return DECLINED;
+    }
+
+    // Only trust last response for data
+    while (response->next) {
+        response = response->next;
+    }
+
+    should_log = redirectionio_action_should_log_request(context->action, config->enable_logs == 1, response->status);
+
+    if (!should_log) {
         return DECLINED;
     }
 
