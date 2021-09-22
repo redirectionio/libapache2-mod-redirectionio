@@ -12,7 +12,7 @@ all: src/mod_redirectionio.so
 	@CC@ @CFLAGS@ -I. -c $(@:.o=.c) -fPIC -DPIC -o $@
 
 src/mod_redirectionio.so: $(OBJ)
-	@CC@ -shared -fPIC -DPIC $(OBJ) @LDFLAGS@ @LIBS@ -Wl,--as-needed -Wl,-z,relro -Wl,-z,now -g -O2 -fstack-protector-strong -Wl,-soname -Wl,mod_redirectionio.so -o $@
+	@CC@ -shared -fPIC -DPIC $(OBJ) @LDFLAGS@ @LIBS@ -Wl,-allow-multiple-definition -Wl,--as-needed -Wl,-z,relro -Wl,-z,now -g -O2 -fstack-protector-strong -Wl,-soname -Wl,mod_redirectionio.so -o $@
 
 .PHONY:	install
 install: src/mod_redirectionio.so

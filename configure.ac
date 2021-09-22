@@ -1,6 +1,6 @@
 AC_INIT([mod_redirectionio], [1.0.0], [contact@redirection.io])
 
-AC_ARG_WITH([version], [AS_HELP_STRING([--with-proxy-version],
+AC_ARG_WITH([proxy_version], [AS_HELP_STRING([--with-proxy-version],
     [proxy version to output])],
     [PROXY_VERSION=$withval], [PROXY_VERSION=libapache2-mod-redirectionio:dev])
 
