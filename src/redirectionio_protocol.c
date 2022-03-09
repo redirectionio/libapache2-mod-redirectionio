@@ -237,6 +237,20 @@ apr_status_t redirectionio_protocol_send_filter_headers(redirectionio_context *c
         first_header = current_header;
     }
 
+    if (r->content_type) {
+        current_header = (struct REDIRECTIONIO_HeaderMap *) apr_palloc(r->pool, sizeof(struct REDIRECTIONIO_HeaderMap));
+
+        if (current_header == NULL) {
+            return APR_EGENERAL;
+        }
+
+        current_header->name = (const char *)"Content-Type";
+        current_header->value = (const char *)r->content_type;
+        current_header->next = first_header;
+
+        first_header = current_header;
+    }
+
     first_header = (struct REDIRECTIONIO_HeaderMap *)redirectionio_action_header_filter_filter(ctx->action, first_header, r->status, config->show_rule_ids == 1);
     ctx->response_headers = first_header;
 
