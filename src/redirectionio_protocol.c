@@ -251,7 +251,7 @@ apr_status_t redirectionio_protocol_send_filter_headers(redirectionio_context *c
         first_header = current_header;
     }
 
-    first_header = (struct REDIRECTIONIO_HeaderMap *)redirectionio_action_header_filter_filter(ctx->action, first_header, r->status, config->show_rule_ids == 1);
+    first_header = (struct REDIRECTIONIO_HeaderMap *)redirectionio_action_header_filter_filter(ctx->action, first_header, ctx->backend_response_status_code, config->show_rule_ids == 1);
     ctx->response_headers = first_header;
 
     // Even if error returns success, as it does not affect anything

@@ -11,7 +11,7 @@ static int redirectionio_match_handler(request_rec *r);
 static int redirectionio_redirect_handler(request_rec *r);
 static int redirectionio_log_handler(request_rec *r);
 
-static int redirectionio_redirect_handler_for_status_code(request_rec *r, uint16_t status_code);
+static int redirectionio_redirect_handler_for_status_code(request_rec *r);
 
 static apr_status_t redirectionio_filter_match_on_response(ap_filter_t *f, apr_bucket_brigade *b);
 static apr_status_t redirectionio_filter_header_filtering(ap_filter_t *f, apr_bucket_brigade *b);
@@ -131,6 +131,7 @@ static int redirectionio_match_handler(request_rec *r) {
     ctx->action = NULL;
     ctx->response_headers = NULL;
     ctx->body_filter = NULL;
+    ctx->backend_response_status_code = 0;
 
     ap_set_module_config(r->request_config, &redirectionio_module, ctx);
     redirectionio_connection* conn = redirectionio_acquire_connection(config, r->pool);
@@ -171,7 +172,7 @@ static void ap_headers_insert_output_filter(request_rec *r) {
     ap_add_output_filter("REDIRECTIONIO_BODY_FILTER", ctx, r, r->connection);
 }
 
-static int redirectionio_redirect_handler_for_status_code(request_rec *r, uint16_t status_code) {
+static int redirectionio_redirect_handler_for_status_code(request_rec *r) {
     apr_uint16_t            new_status_code;
     redirectionio_config    *config = (redirectionio_config*) ap_get_module_config(r->per_dir_config, &redirectionio_module);
 
@@ -191,7 +192,7 @@ static int redirectionio_redirect_handler_for_status_code(request_rec *r, uint16
         return DECLINED;
     }
 
-    new_status_code = redirectionio_action_get_status_code(ctx->action, status_code);
+    new_status_code = redirectionio_action_get_status_code(ctx->action, ctx->backend_response_status_code);
 
     if (new_status_code == 0) {
         return DECLINED;
@@ -208,11 +209,26 @@ static int redirectionio_redirect_handler_for_status_code(request_rec *r, uint16
 }
 
 static int redirectionio_redirect_handler(request_rec *r) {
-    return redirectionio_redirect_handler_for_status_code(r, 0);
+    redirectionio_context   *ctx = ap_get_module_config(r->request_config, &redirectionio_module);
+
+    if (ctx == NULL) {
+        return DECLINED;
+    }
+
+    ctx->backend_response_status_code = 0;
+
+    return redirectionio_redirect_handler_for_status_code(r);
 }
 
 static apr_status_t redirectionio_filter_match_on_response(ap_filter_t *f, apr_bucket_brigade *bb) {
-    redirectionio_redirect_handler_for_status_code(f->r, f->r->status);
+    redirectionio_context   *ctx = ap_get_module_config(r->request_config, &redirectionio_module);
+
+    if (ctx == NULL) {
+        return DECLINED;
+    }
+
+    ctx->backend_response_status_code = f->r->status;
+    redirectionio_redirect_handler_for_status_code(f->r);
 
     /* remove ourselves from the filter chain */
     ap_remove_output_filter(f);
@@ -254,7 +270,7 @@ static apr_status_t redirectionio_filter_body_filtering(ap_filter_t *f, apr_buck
     }
 
     if (ctx->body_filter == NULL) {
-        ctx->body_filter = (struct REDIRECTIONIO_FilterBodyAction *)redirectionio_action_body_filter_create(ctx->action, f->r->status);
+        ctx->body_filter = (struct REDIRECTIONIO_FilterBodyAction *)redirectionio_action_body_filter_create(ctx->action, ctx->backend_response_status_code);
 
         if (ctx->body_filter == NULL) {
             ap_remove_output_filter(f);
@@ -373,7 +389,7 @@ static int redirectionio_log_handler(request_rec *r) {
         response = response->next;
     }
 
-    should_log = redirectionio_action_should_log_request(context->action, config->enable_logs == 1, response->status);
+    should_log = redirectionio_action_should_log_request(context->action, config->enable_logs == 1, context->backend_response_status_code);
 
     if (!should_log) {
         return DECLINED;
