@@ -200,7 +200,7 @@ static int redirectionio_redirect_handler_for_status_code(request_rec *r) {
 
     r->status = new_status_code;
 
-    if (status_code == 0) {
+    if (ctx->backend_response_status_code == 0) {
         r->handler = "redirectionio";
         r->filename = "redirectionio";
     }
@@ -221,7 +221,7 @@ static int redirectionio_redirect_handler(request_rec *r) {
 }
 
 static apr_status_t redirectionio_filter_match_on_response(ap_filter_t *f, apr_bucket_brigade *bb) {
-    redirectionio_context   *ctx = ap_get_module_config(r->request_config, &redirectionio_module);
+    redirectionio_context   *ctx = ap_get_module_config(f->r->request_config, &redirectionio_module);
 
     if (ctx == NULL) {
         return DECLINED;
