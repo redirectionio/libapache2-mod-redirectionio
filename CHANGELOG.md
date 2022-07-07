@@ -1,3 +1,7 @@
+## 2.4.0 - 07-07-2022
+
+ * Fix a bug when multiple rules where used with a backend status code trigger
+
 ## 2.3.0 - 13-04-2022
 
  * Added the `RedirectionioTrustedProxies` configuration directive for correct ip matching - ([see the documentation](https://redirection.io/documentation/developer-documentation/apache-module#redirectioniotrustedproxies))
