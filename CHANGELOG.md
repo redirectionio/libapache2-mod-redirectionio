@@ -4,11 +4,11 @@
 
 ## 2.3.0 - 13-04-2022
 
- * Added the `RedirectionioTrustedProxies` configuration directive for correct ip matching - ([see the documentation](https://redirection.io/documentation/developer-documentation/apache-module#redirectioniotrustedproxies))
- * Added support for the IP address trigger (requires the version 2.3 of the agent)
- * Added support for the robots.txt action (requires the version 2.3 of the agent)
- * Added the possibility to disable log for a specific request using a rule (requires the version 2.3 of the agent)
- * Added support for logging the `Content-Type` response header
+ * Add the `RedirectionioTrustedProxies` configuration directive for correct ip matching - ([see the documentation](https://redirection.io/documentation/developer-documentation/apache-module#redirectioniotrustedproxies))
+ * Add support for the IP address trigger (requires the version 2.3 of the agent)
+ * Add support for the robots.txt action (requires the version 2.3 of the agent)
+ * Add the possibility to disable log for a specific request using a rule (requires the version 2.3 of the agent)
+ * Add support for logging the `Content-Type` response header
 
 ## 2.2.2 - 22-09-2021
 
@@ -16,8 +16,8 @@
 
 ## 2.2.0 - 06-05-2021
 
- * added the `RedirectionioSetHeader` directive - ([see the documentation](https://redirection.io/documentation/developer-documentation/apache-module#redirectioniosetheader))
- * added connection pool management options to the `RedirectionioPass` directive: `min_conns`, `keep_conns`, `max_conns` and `timeout` - ([see the documentation](https://redirection.io/documentation/developer-documentation/apache-module#redirectioniopass))
+ * Add the `RedirectionioSetHeader` directive - ([see the documentation](https://redirection.io/documentation/developer-documentation/apache-module#redirectioniosetheader))
+ * Add connection pool management options to the `RedirectionioPass` directive: `min_conns`, `keep_conns`, `max_conns` and `timeout` - ([see the documentation](https://redirection.io/documentation/developer-documentation/apache-module#redirectioniopass))
 
 ## 2.1.0 - 02-02-2021
 
