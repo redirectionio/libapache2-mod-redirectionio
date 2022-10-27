@@ -270,7 +270,7 @@ static apr_status_t redirectionio_filter_body_filtering(ap_filter_t *f, apr_buck
     }
 
     if (ctx->body_filter == NULL) {
-        ctx->body_filter = (struct REDIRECTIONIO_FilterBodyAction *)redirectionio_action_body_filter_create(ctx->action, ctx->backend_response_status_code);
+        ctx->body_filter = (struct REDIRECTIONIO_FilterBodyAction *)redirectionio_action_body_filter_create(ctx->action, ctx->backend_response_status_code, ctx->response_headers);
 
         if (ctx->body_filter == NULL) {
             ap_remove_output_filter(f);
