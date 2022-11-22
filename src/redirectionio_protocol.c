@@ -264,6 +264,10 @@ apr_status_t redirectionio_protocol_send_filter_headers(redirectionio_context *c
 
     while (first_header != NULL) {
         if (first_header->name != NULL && first_header->value != NULL) {
+            if (strcasecmp(first_header->name, "Content-Type") == 0) {
+                ap_set_content_type(r, apr_pstrdup(r->pool, first_header->value));
+            }
+
             name_str = apr_pstrdup(r->pool, first_header->name);
             value_str = apr_pstrdup(r->pool, first_header->value);
 
