@@ -461,12 +461,14 @@ static apr_status_t redirectionio_create_connection(redirectionio_connection *co
         return rv;
     }
 
-    rv = apr_socket_opt_set(conn->rio_sock, APR_TCP_NODELAY, 1);
+    if (config->server.protocol == TCP) {
+        rv = apr_socket_opt_set(conn->rio_sock, APR_TCP_NODELAY, 1);
 
-    if (rv != APR_SUCCESS) {
-        ap_log_perror(APLOG_MARK, APLOG_ERR, 0, pool, "mod_redirectionio: Error setting socket TCP nodelay: %s", apr_strerror(rv, errbuf, sizeof(errbuf)));
+        if (rv != APR_SUCCESS) {
+            ap_log_perror(APLOG_MARK, APLOG_ERR, 0, pool, "mod_redirectionio: Error setting socket TCP nodelay: %s", apr_strerror(rv, errbuf, sizeof(errbuf)));
 
-        return rv;
+            return rv;
+        }
     }
 
     rv = apr_socket_timeout_set(conn->rio_sock, config->server.timeout * 1000);
