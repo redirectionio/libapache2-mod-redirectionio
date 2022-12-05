@@ -1,7 +1,16 @@
-## 2.4.1 - 23-11-2022
+## 2.4.3 - 05-12-2022
+
+* Fix a memory leak on the log callback
+* Fix a potential memory leak on the body filtering system
+
+## 2.4.2 - 23-11-2022
 
  * Allow libredirectionio to modify the `Content-Type` header
  * Fix using a unix socket for the agent connection
+
+## 2.4.1 - 27-10-2022
+
+* Support gzip compression when filtering body, by updating libredirectionio deps
 
 ## 2.4.0 - 07-07-2022
 
