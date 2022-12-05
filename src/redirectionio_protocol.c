@@ -21,12 +21,6 @@ static apr_status_t redirectionio_read_string(redirectionio_connection *conn, ch
 
 static apr_status_t redirectionio_send_protocol_header(redirectionio_connection *conn, const char *project_key, apr_uint16_t command, request_rec *r);
 
-static apr_status_t redirectionio_action_cleanup(void *action);
-
-static apr_status_t redirectionio_request_cleanup(void *request);
-
-static apr_status_t redirectionio_response_headers_cleanup(void *response_headers);
-
 apr_status_t redirectionio_protocol_match(redirectionio_connection *conn, redirectionio_context *ctx, request_rec *r, const char *project_key) {
     apr_uint32_t                    alen;
     apr_status_t                    rv;
@@ -92,8 +86,6 @@ apr_status_t redirectionio_protocol_match(redirectionio_connection *conn, redire
 
     redirectionio_request_set_remote_addr(ctx->request, r->connection->client_ip, config->trusted_proxies);
 
-    apr_pool_pre_cleanup_register(r->pool, ctx->request, redirectionio_request_cleanup);
-
     // Serialize request
     request_serialized = redirectionio_request_json_serialize(ctx->request);
 
@@ -155,10 +147,6 @@ apr_status_t redirectionio_protocol_match(redirectionio_connection *conn, redire
 
         // Unserialize action
         ctx->action = (struct REDIRECTIONIO_Action *)redirectionio_action_json_deserialize(action_serialized);
-
-        if (ctx->action != NULL) {
-            apr_pool_pre_cleanup_register(r->pool, ctx->action, redirectionio_action_cleanup);
-        }
     }
 
     return APR_SUCCESS;
@@ -259,7 +247,6 @@ apr_status_t redirectionio_protocol_send_filter_headers(redirectionio_context *c
         return APR_SUCCESS;
     }
 
-    apr_pool_pre_cleanup_register(r->pool, ctx->response_headers, redirectionio_response_headers_cleanup);
     apr_table_clear(r->headers_out);
 
     while (first_header != NULL) {
@@ -448,31 +435,38 @@ static apr_status_t redirectionio_send_protocol_header(redirectionio_connection 
     return APR_SUCCESS;
 }
 
-static apr_status_t redirectionio_action_cleanup(void *action) {
-    redirectionio_action_drop(action);
-
-    return APR_SUCCESS;
-}
-
-static apr_status_t redirectionio_request_cleanup(void *request) {
-    redirectionio_request_drop(request);
-
-    return APR_SUCCESS;
-}
-
-static apr_status_t redirectionio_response_headers_cleanup(void *response_headers) {
+apr_status_t redirectionio_context_cleanup(void *context) {
     struct REDIRECTIONIO_HeaderMap  *first_header, *tmp_header;
+    redirectionio_context           *ctx = (redirectionio_context *)context;
 
-    first_header = (struct REDIRECTIONIO_HeaderMap *)response_headers;
+    if (ctx->request != NULL) {
+        redirectionio_request_drop(ctx->request);
+    }
 
-    while (first_header != NULL) {
-        tmp_header = first_header->next;
+    if (ctx->action != NULL) {
+        redirectionio_action_drop(ctx->action);
+        ctx->action = NULL;
+    }
 
-        free((void *)first_header->name);
-        free((void *)first_header->value);
-        free((void *)first_header);
+    if (ctx->response_headers != NULL) {
+        first_header = (struct REDIRECTIONIO_HeaderMap *)ctx->response_headers;
 
-        first_header = tmp_header;
+        while (first_header != NULL) {
+            tmp_header = first_header->next;
+
+            free((void *)first_header->name);
+            free((void *)first_header->value);
+            free((void *)first_header);
+
+            first_header = tmp_header;
+        }
+
+        ctx->response_headers = NULL;
+    }
+
+    if (ctx->body_filter != NULL) {
+        redirectionio_action_body_filter_drop(ctx->body_filter);
+        ctx->body_filter = NULL;
     }
 
     return APR_SUCCESS;

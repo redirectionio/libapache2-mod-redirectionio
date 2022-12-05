@@ -127,6 +127,8 @@ static int redirectionio_match_handler(request_rec *r) {
         return DECLINED;
     }
 
+    apr_pool_pre_cleanup_register(r->pool, ctx, redirectionio_context_cleanup);
+
     ctx->request = NULL;
     ctx->action = NULL;
     ctx->response_headers = NULL;
@@ -879,6 +881,8 @@ static void redirectionio_apache_log_callback(const char* log_str, const void* d
     if (level <= 1) {
         ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, (request_rec *)data, "mod_redirectionio api error: %s", log_str);
     }
+
+    free((char *)log_str);
 }
 
 static apr_status_t redirectionio_atoi(const char *line, apr_size_t len) {
