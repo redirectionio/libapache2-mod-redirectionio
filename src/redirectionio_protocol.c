@@ -464,10 +464,5 @@ apr_status_t redirectionio_context_cleanup(void *context) {
         ctx->response_headers = NULL;
     }
 
-    if (ctx->body_filter != NULL) {
-        redirectionio_action_body_filter_drop(ctx->body_filter);
-        ctx->body_filter = NULL;
-    }
-
     return APR_SUCCESS;
 }

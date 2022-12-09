@@ -252,6 +252,15 @@ static apr_status_t redirectionio_filter_header_filtering(ap_filter_t *f, apr_bu
     redirectionio_protocol_send_filter_headers(ctx, f->r);
     ap_remove_output_filter(f);
 
+    if (ctx->body_filter == NULL) {
+        ctx->body_filter = (struct REDIRECTIONIO_FilterBodyAction *)redirectionio_action_body_filter_create(ctx->action, ctx->backend_response_status_code, ctx->response_headers);
+
+        // Force chunked encoding
+        if (ctx->body_filter != NULL) {
+            apr_table_unset(f->r->headers_out, "Content-Length");
+        }
+    }
+
     return ap_pass_brigade(f->next, bb);
 }
 
@@ -267,21 +276,10 @@ static apr_status_t redirectionio_filter_body_filtering(ap_filter_t *f, apr_buck
         return ap_pass_brigade(f->next, bb);
     }
 
-    if (ctx->action == NULL) {
-        return ap_pass_brigade(f->next, bb);
-    }
-
     if (ctx->body_filter == NULL) {
-        ctx->body_filter = (struct REDIRECTIONIO_FilterBodyAction *)redirectionio_action_body_filter_create(ctx->action, ctx->backend_response_status_code, ctx->response_headers);
+        ap_remove_output_filter(f);
 
-        if (ctx->body_filter == NULL) {
-            ap_remove_output_filter(f);
-
-            return ap_pass_brigade(f->next, bb);
-        }
-
-        // Force chunked encoding
-        apr_table_unset(f->r->headers_out, "Content-Length");
+        return ap_pass_brigade(f->next, bb);
     }
 
     if (APR_BRIGADE_EMPTY(bb)) {
@@ -316,7 +314,10 @@ static apr_status_t redirectionio_filter_body_filtering(ap_filter_t *f, apr_buck
                 b_new = apr_bucket_transient_create((const char *)output.data, output.len, f->r->connection->bucket_alloc);
 
                 if (b_new == NULL) {
+                    redirectionio_action_body_filter_drop(ctx->body_filter);
+                    ctx->body_filter = NULL;
                     ap_remove_output_filter(f);
+                    free(output.data);
 
                     return ap_pass_brigade(f->next, bb);
                 }
@@ -328,13 +329,15 @@ static apr_status_t redirectionio_filter_body_filtering(ap_filter_t *f, apr_buck
 
         if (APR_BUCKET_IS_EOS(b)) {
             output = redirectionio_action_body_filter_close(ctx->body_filter);
+            ctx->body_filter = NULL;
+            ap_remove_output_filter(f);
 
             if (output.len > 0) {
                 // Create a new one
                 b_new = apr_bucket_transient_create((const char *)output.data, output.len, f->r->connection->bucket_alloc);
 
                 if (b_new == NULL) {
-                    ap_remove_output_filter(f);
+                    free(output.data);
 
                     return ap_pass_brigade(f->next, bb);
                 }
@@ -347,15 +350,10 @@ static apr_status_t redirectionio_filter_body_filtering(ap_filter_t *f, apr_buck
             b_new = apr_bucket_eos_create(f->r->connection->bucket_alloc);
 
             if (b_new == NULL) {
-                ap_remove_output_filter(f);
-
                 return ap_pass_brigade(f->next, bb);
             }
 
             APR_BRIGADE_INSERT_TAIL(bb_new, b_new);
-
-            // Remove filter
-            ap_remove_output_filter(f);
 
             // Break
             break;
