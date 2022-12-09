@@ -1,3 +1,8 @@
+## 2.4.4 - 08-12-2022
+
+* Fix segfault on body filtering in some cases
+* Fix a memory leak in body filtering, when there is an error on bucket creation
+
 ## 2.4.3 - 05-12-2022
 
 * Fix a memory leak on the log callback
