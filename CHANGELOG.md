@@ -1,3 +1,7 @@
+## 2.5.0 - 20-03-2023
+
+* Support new compression format for body filtering: deflate and brotli
+
 ## 2.4.4 - 08-12-2022
 
 * Fix segfault on body filtering in some cases
