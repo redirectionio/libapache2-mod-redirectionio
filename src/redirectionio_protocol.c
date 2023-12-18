@@ -163,7 +163,7 @@ apr_status_t redirectionio_protocol_log(redirectionio_connection *conn, redirect
         response = response->next;
     }
 
-    log = redirectionio_api_create_log_in_json(ctx->request, response->status, ctx->response_headers, ctx->action, PROXY_VERSION_STR(PROXY_VERSION), response->request_time, r->connection->client_ip);
+    log = redirectionio_api_create_log_in_json(ctx->request, response->status, ctx->response_headers, ctx->action, PROXY_VERSION_STR(PROXY_VERSION), response->request_time / 1000, r->connection->client_ip);
 
     if (log == NULL) {
         return APR_EGENERAL;
