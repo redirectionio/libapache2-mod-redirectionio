@@ -109,7 +109,7 @@ static int redirectionio_match_handler(request_rec *r) {
         }
 
         apr_reslist_timeout_set(config->connection_pool, config->server.timeout * 1000);
-        apr_pool_cleanup_register(config->pool, config->connection_pool, redirectionio_child_exit, redirectionio_child_exit);
+        apr_pool_cleanup_register(config->pool, config->connection_pool, redirectionio_child_exit, apr_pool_cleanup_null);
     }
 
     // Create context
@@ -659,9 +659,10 @@ static apr_status_t redirectionio_pool_destruct(void* resource, void* params, ap
 static apr_status_t redirectionio_child_exit(void *resource) {
     apr_reslist_t   *connection_pool = (apr_reslist_t *)resource;
     apr_pool_t      *pool;
-    apr_pool_create(&pool, NULL);
 
-    while (apr_reslist_acquired_count(connection_pool) != 0) {
+    if (apr_reslist_acquired_count(connection_pool) > 0) {
+        apr_pool_create(&pool, NULL);
+
         ap_log_perror(APLOG_MARK, APLOG_ERR, 0, pool, "mod_redirectionio: Socket pool not empty: %i", apr_reslist_acquired_count(connection_pool));
     }
 
