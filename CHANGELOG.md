@@ -1,3 +1,7 @@
+## 2.9.1 - 25-07-2025
+
+* Correctly clear connections pool after the main pool has been cleaned. In rare cases, excessive log entries were generated due to connections not being correctly cleared from the pool.
+
 ## 2.9.0 - 28-05-2024
 
 * Update libredirectionio to 2.11.2
