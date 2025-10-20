@@ -76,6 +76,8 @@ typedef struct {
     struct REDIRECTIONIO_HeaderMap          *response_headers;
     struct REDIRECTIONIO_FilterBodyAction   *body_filter;
     uint16_t                                backend_response_status_code;
+    apr_time_t                              action_match_time;
+    apr_time_t                              proxy_response_time;
 } redirectionio_context;
 
 module AP_MODULE_DECLARE_DATA redirectionio_module;

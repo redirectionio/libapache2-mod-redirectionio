@@ -134,6 +134,8 @@ static int redirectionio_match_handler(request_rec *r) {
     ctx->response_headers = NULL;
     ctx->body_filter = NULL;
     ctx->backend_response_status_code = 0;
+    ctx->action_match_time = 0;
+    ctx->proxy_response_time = 0;
 
     ap_set_module_config(r->request_config, &redirectionio_module, ctx);
     redirectionio_connection* conn = redirectionio_acquire_connection(config, r->pool);
@@ -254,6 +256,7 @@ static apr_status_t redirectionio_filter_header_filtering(ap_filter_t *f, apr_bu
 
     if (ctx->body_filter == NULL) {
         ctx->body_filter = (struct REDIRECTIONIO_FilterBodyAction *)redirectionio_action_body_filter_create(ctx->action, ctx->backend_response_status_code, ctx->response_headers);
+        ctx->proxy_response_time = apr_time_now() / 1000;
 
         // Force chunked encoding
         if (ctx->body_filter != NULL) {
