@@ -10,13 +10,13 @@ jobs:
         strategy:
             matrix:
                 distribution:
-                    - buster
-                    - bullseye
                     - bookworm
+                    - bullseye
+                    - centos_9
                     - focal
                     - jammy
                     - noble
-                    - centos_9
+                    - trixie
         steps:
             -   name: Set version
                 env:
