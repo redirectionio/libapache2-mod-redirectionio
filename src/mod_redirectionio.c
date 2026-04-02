@@ -37,7 +37,7 @@ static const char *redirectionio_set_show_rule_ids(cmd_parms *cmd, void *cfg, co
 static const char *redirectionio_set_server(cmd_parms *cmd, void *dc, int argc, char *const argv[]);
 static const char *redirectionio_set_header(cmd_parms *cmd, void *cfg, const char *arg1, const char *arg2);
 static const char *redirectionio_set_trusted_proxies(cmd_parms *cmd, void *cfg, const char *arg);
-static void redirectionio_apache_log_callback(const char* log_str, const void* data, short level);
+static const char *redirectionio_trace_enable(cmd_parms *cmd, void *cfg);
 static apr_status_t redirectionio_atoi(const char *line, apr_size_t len);
 
 static const command_rec redirectionio_directives[] = {
@@ -49,6 +49,7 @@ static const command_rec redirectionio_directives[] = {
     AP_INIT_TAKE1("redirectionioRuleIdsHeader", redirectionio_set_show_rule_ids, NULL, OR_ALL, "Show rule ids used on response header"),
     AP_INIT_TAKE2("redirectionioSetHeader", redirectionio_set_header, NULL, OR_ALL, "Add header to match in redirectionio request"),
     AP_INIT_TAKE1("redirectionioTrustedProxies", redirectionio_set_trusted_proxies, NULL, OR_ALL, "Trusted proxies to filter client ip"),
+    AP_INIT_NO_ARGS("redirectionioTraceEnable", redirectionio_trace_enable, NULL, OR_ALL, "Enable trace for redirectionio"),
     { NULL }
 };
 
@@ -143,9 +144,6 @@ static int redirectionio_match_handler(request_rec *r) {
     if (conn == NULL) {
         return DECLINED;
     }
-
-    // Init logging
-    redirectionio_log_init_with_callback(redirectionio_apache_log_callback, r);
 
     // Ask for redirection
     if (redirectionio_protocol_match(conn, ctx, r, config->project_key) != APR_SUCCESS) {
@@ -879,12 +877,10 @@ static const char *redirectionio_set_trusted_proxies(cmd_parms *cmd, void *cfg, 
     return NULL;
 }
 
-static void redirectionio_apache_log_callback(const char* log_str, const void* data, short level) {
-    if (level <= 1) {
-        ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, (request_rec *)data, "mod_redirectionio api error: %s", log_str);
-    }
+static const char *redirectionio_trace_enable(cmd_parms *cmd, void *cfg) {
+    redirectionio_trace_init();
 
-    free((char *)log_str);
+    return NULL;
 }
 
 static apr_status_t redirectionio_atoi(const char *line, apr_size_t len) {
