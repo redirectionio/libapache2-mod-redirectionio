@@ -97,6 +97,8 @@ apr_status_t redirectionio_protocol_match(redirectionio_connection *conn, redire
     rv = redirectionio_send_protocol_header(conn, project_key, REDIRECTIONIO_PROTOCOL_COMMAND_MATCH_ACTION, r);
 
     if (rv != APR_SUCCESS) {
+        free((void *)request_serialized);
+
         return rv;
     }
 
