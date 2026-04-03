@@ -1,6 +1,17 @@
+## 3.1.0 - 04-04-2026
+
+* Update libredirectionio to 3.1.0
+* Fix potential memory leak when when the agent is no longer available
+* Add directive to enable redirectionio tracing, remove log callback
+
+## 3.0.0 - 26-02-2026
+
+* Update libredirectionio to 3.0.0
+
 ## 2.9.1 - 25-07-2025
 
-* Correctly clear connections pool after the main pool has been cleaned. In rare cases, excessive log entries were generated due to connections not being correctly cleared from the pool.
+* Correctly clear connections pool after the main pool has been cleaned. In rare cases, excessive log entries were
+  generated due to connections not being correctly cleared from the pool.
 
 ## 2.9.0 - 28-05-2024
 
@@ -65,7 +76,8 @@
 * Add the `RedirectionioSetHeader`
   directive - ([see the documentation](https://redirection.io/documentation/developer-documentation/apache-module#redirectioniosetheader))
 * Add connection pool management options to the `RedirectionioPass` directive: `min_conns`, `keep_conns`, `max_conns`
-  and `timeout` - ([see the documentation](https://redirection.io/documentation/developer-documentation/apache-module#redirectioniopass))
+  and
+  `timeout` - ([see the documentation](https://redirection.io/documentation/developer-documentation/apache-module#redirectioniopass))
 
 ## 2.1.0 - 02-02-2021
 
