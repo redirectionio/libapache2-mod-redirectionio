@@ -84,7 +84,7 @@ apr_status_t redirectionio_protocol_match(redirectionio_connection *conn, redire
         return APR_EGENERAL;
     }
 
-    redirectionio_request_set_remote_addr(ctx->request, r->connection->client_ip, config->trusted_proxies);
+    redirectionio_request_set_remote_addr(ctx->request, r->useragent_ip, config->trusted_proxies);
 
     // Serialize request
     request_serialized = redirectionio_request_json_serialize(ctx->request);
@@ -166,7 +166,7 @@ apr_status_t redirectionio_protocol_log(redirectionio_connection *conn, redirect
         response = response->next;
     }
 
-    log = redirectionio_api_create_log_in_json(ctx->request, response->status, ctx->response_headers, ctx->action, PROXY_VERSION_STR(PROXY_VERSION), response->request_time / 1000, ctx->action_match_time, ctx->proxy_response_time, r->connection->client_ip);
+    log = redirectionio_api_create_log_in_json(ctx->request, response->status, ctx->response_headers, ctx->action, PROXY_VERSION_STR(PROXY_VERSION), response->request_time / 1000, ctx->action_match_time, ctx->proxy_response_time, r->useragent_ip);
 
     if (log == NULL) {
         return APR_EGENERAL;
