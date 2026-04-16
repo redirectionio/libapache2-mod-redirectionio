@@ -85,8 +85,14 @@ static int redirectionio_match_handler(request_rec *r) {
         return DECLINED;
     }
 
-    // Do not match against internal redirect
+    // reuse context from prev requests in case of internal redirects, to keep the same redirectionio request and response
     if (r->prev) {
+        redirectionio_context   *ctx = ap_get_module_config(r->prev->request_config, &redirectionio_module);
+
+        if (ctx != NULL) {
+            ap_set_module_config(r->request_config, &redirectionio_module, ctx);
+        }
+
         return DECLINED;
     }
 
