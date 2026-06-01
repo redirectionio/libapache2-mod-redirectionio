@@ -3,7 +3,14 @@
 
 static char errbuf[1024];
 
+// Process-wide mutex guarding the lazy creation of each config's connection pool.
+// Created once per child process in redirectionio_child_init, before request threads start.
+static apr_thread_mutex_t *redirectionio_pool_mutex = NULL;
+
 static void redirectionio_register_hooks(apr_pool_t *p);
+
+static void redirectionio_child_init(apr_pool_t *pool, server_rec *s);
+static apr_status_t redirectionio_init_connection_pool(redirectionio_config *config);
 
 static void ap_headers_insert_output_filter(request_rec *r);
 
@@ -64,6 +71,8 @@ module AP_MODULE_DECLARE_DATA redirectionio_module = {
 };
 
 static void redirectionio_register_hooks(apr_pool_t *p) {
+    ap_hook_child_init(redirectionio_child_init, NULL, NULL, APR_HOOK_MIDDLE);
+
     ap_hook_type_checker(redirectionio_match_handler, NULL, NULL, APR_HOOK_FIRST);
     ap_hook_fixups(redirectionio_match_handler, NULL, NULL, APR_HOOK_FIRST);
 
@@ -76,6 +85,77 @@ static void redirectionio_register_hooks(apr_pool_t *p) {
     ap_register_output_filter("REDIRECTIONIO_REDIRECT_FILTER", redirectionio_filter_match_on_response, NULL, AP_FTYPE_CONTENT_SET - 1);
     ap_register_output_filter("REDIRECTIONIO_HEADER_FILTER", redirectionio_filter_header_filtering, NULL, AP_FTYPE_CONTENT_SET - 1);
     ap_register_output_filter("REDIRECTIONIO_BODY_FILTER", redirectionio_filter_body_filtering, NULL, AP_FTYPE_CONTENT_SET - 1);
+}
+
+static void redirectionio_child_init(apr_pool_t *pool, server_rec *s) {
+    // Created once per child process, before request threads are spawned, so the
+    // lazy connection-pool initialization in redirectionio_match_handler is race-free.
+    apr_status_t rv = apr_thread_mutex_create(&redirectionio_pool_mutex, APR_THREAD_MUTEX_DEFAULT, pool);
+
+    if (rv != APR_SUCCESS) {
+        redirectionio_pool_mutex = NULL;
+        ap_log_error(APLOG_MARK, APLOG_CRIT, rv, s, "mod_redirectionio: Failed to create init mutex: %s", apr_strerror(rv, errbuf, sizeof(errbuf)));
+    }
+}
+
+// Build the reslist on a dedicated pool whose allocator owns a mutex, so the reslist
+// constructor (which apr calls outside its own lock) can allocate sockets concurrently
+// from request threads without corrupting the pool. Must be called under redirectionio_pool_mutex.
+static apr_status_t redirectionio_init_connection_pool(redirectionio_config *config) {
+    apr_allocator_t     *allocator;
+    apr_pool_t          *reslist_pool;
+    apr_thread_mutex_t  *mutex;
+    apr_status_t        rv;
+
+    rv = apr_allocator_create(&allocator);
+
+    if (rv != APR_SUCCESS) {
+        return rv;
+    }
+
+    rv = apr_pool_create_ex(&reslist_pool, config->pool, NULL, allocator);
+
+    if (rv != APR_SUCCESS) {
+        apr_allocator_destroy(allocator);
+
+        return rv;
+    }
+
+    apr_allocator_owner_set(allocator, reslist_pool);
+
+    rv = apr_thread_mutex_create(&mutex, APR_THREAD_MUTEX_DEFAULT, reslist_pool);
+
+    if (rv != APR_SUCCESS) {
+        apr_pool_destroy(reslist_pool);
+
+        return rv;
+    }
+
+    apr_allocator_mutex_set(allocator, mutex);
+
+    rv = apr_reslist_create(
+        &config->connection_pool,
+        config->server.min_conns,
+        config->server.keep_conns,
+        config->server.max_conns,
+        0,
+        redirectionio_pool_construct,
+        redirectionio_pool_destruct,
+        config,
+        reslist_pool
+    );
+
+    if (rv != APR_SUCCESS) {
+        config->connection_pool = NULL;
+        apr_pool_destroy(reslist_pool);
+
+        return rv;
+    }
+
+    apr_reslist_timeout_set(config->connection_pool, config->server.timeout * 1000);
+    apr_pool_cleanup_register(config->pool, config->connection_pool, redirectionio_child_exit, apr_pool_cleanup_null);
+
+    return APR_SUCCESS;
 }
 
 static int redirectionio_match_handler(request_rec *r) {
@@ -97,26 +177,24 @@ static int redirectionio_match_handler(request_rec *r) {
     }
 
     if (config->connection_pool == NULL) {
-        if (apr_reslist_create(
-            &config->connection_pool,
-            config->server.min_conns,
-            config->server.keep_conns,
-            config->server.max_conns,
-            0,
-            redirectionio_pool_construct,
-            redirectionio_pool_destruct,
-            config,
-            config->pool
-        ) != APR_SUCCESS) {
-            ap_log_rerror(APLOG_MARK, APLOG_CRIT, 0, r, "mod_redirectionio: Failed to initialize resource pool, disabling redirectionio.");
+        if (redirectionio_pool_mutex != NULL) {
+            apr_thread_mutex_lock(redirectionio_pool_mutex);
+        }
 
+        // Double-checked locking: another thread may have created the pool while we waited for the lock.
+        if (config->connection_pool == NULL && redirectionio_init_connection_pool(config) != APR_SUCCESS) {
             config->enable = 0;
+        }
+
+        if (redirectionio_pool_mutex != NULL) {
+            apr_thread_mutex_unlock(redirectionio_pool_mutex);
+        }
+
+        if (config->connection_pool == NULL) {
+            ap_log_rerror(APLOG_MARK, APLOG_CRIT, 0, r, "mod_redirectionio: Failed to initialize resource pool, disabling redirectionio.");
 
             return DECLINED;
         }
-
-        apr_reslist_timeout_set(config->connection_pool, config->server.timeout * 1000);
-        apr_pool_cleanup_register(config->pool, config->connection_pool, redirectionio_child_exit, apr_pool_cleanup_null);
     }
 
     // Create context
@@ -633,7 +711,10 @@ static apr_status_t redirectionio_pool_construct(void** rs, void* params, apr_po
     apr_status_t                rv;
 
     if (conf->enable != 1) {
-        return APR_SUCCESS;
+        // Never hand an unset resource back to the reslist: it would store garbage.
+        *rs = NULL;
+
+        return APR_EGENERAL;
     }
 
     conn = apr_palloc(pool, sizeof(redirectionio_connection));

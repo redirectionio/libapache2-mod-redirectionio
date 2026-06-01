@@ -3,6 +3,8 @@
 
 #include "apr_network_io.h"
 #include "apr_reslist.h"
+#include "apr_allocator.h"
+#include "apr_thread_mutex.h"
 #include "httpd.h"
 #include "http_config.h"
 #include "http_log.h"
