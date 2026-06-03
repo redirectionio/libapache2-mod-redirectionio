@@ -389,26 +389,31 @@ static apr_status_t redirectionio_filter_body_filtering(ap_filter_t *f, apr_buck
 
         // Send bucket
         if (input.len > 0) {
-            input.data = malloc(input.len);
-            memcpy(input.data, input_bucket, input.len);
+            // The library owns its copy of the data, so no C-side buffer to free here
+            input = redirectionio_api_buffer_create((const uint8_t *)input_bucket, input.len);
 
             output = redirectionio_action_body_filter_filter(ctx->body_filter, input);
 
             // Create a new one
             if (output.len > 0) {
-                b_new = apr_bucket_transient_create((const char *)output.data, output.len, f->r->connection->bucket_alloc);
+                // heap_create with a NULL free function copies the data into apr-owned
+                // memory, so the library buffer can be released right after.
+                b_new = apr_bucket_heap_create((const char *)output.data, output.len, NULL, f->r->connection->bucket_alloc);
 
                 if (b_new == NULL) {
                     redirectionio_action_body_filter_drop(ctx->body_filter);
                     ctx->body_filter = NULL;
                     ap_remove_output_filter(f);
-                    free(output.data);
+                    redirectionio_api_buffer_drop(output);
 
                     return ap_pass_brigade(f->next, bb);
                 }
 
                 // Append it to the new brigade
                 APR_BRIGADE_INSERT_TAIL(bb_new, b_new);
+
+                // Data has been copied into the bucket, release the buffer allocated by the library
+                redirectionio_api_buffer_drop(output);
             }
         }
 
@@ -418,17 +423,21 @@ static apr_status_t redirectionio_filter_body_filtering(ap_filter_t *f, apr_buck
             ap_remove_output_filter(f);
 
             if (output.len > 0) {
-                // Create a new one
-                b_new = apr_bucket_transient_create((const char *)output.data, output.len, f->r->connection->bucket_alloc);
+                // Create a new one; heap_create with a NULL free function copies the
+                // data into apr-owned memory, so the library buffer can be released after.
+                b_new = apr_bucket_heap_create((const char *)output.data, output.len, NULL, f->r->connection->bucket_alloc);
 
                 if (b_new == NULL) {
-                    free(output.data);
+                    redirectionio_api_buffer_drop(output);
 
                     return ap_pass_brigade(f->next, bb);
                 }
 
                 // Append it to the new brigade
                 APR_BRIGADE_INSERT_TAIL(bb_new, b_new);
+
+                // Data has been copied into the bucket, release the buffer allocated by the library
+                redirectionio_api_buffer_drop(output);
             }
 
             // Create also an eos bucket and append it to the brigade

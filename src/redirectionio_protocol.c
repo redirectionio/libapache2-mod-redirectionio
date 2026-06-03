@@ -97,7 +97,7 @@ apr_status_t redirectionio_protocol_match(redirectionio_connection *conn, redire
     rv = redirectionio_send_protocol_header(conn, project_key, REDIRECTIONIO_PROTOCOL_COMMAND_MATCH_ACTION, r);
 
     if (rv != APR_SUCCESS) {
-        free((void *)request_serialized);
+        redirectionio_string_drop(request_serialized);
 
         return rv;
     }
@@ -106,7 +106,7 @@ apr_status_t redirectionio_protocol_match(redirectionio_connection *conn, redire
     rv = redirectionio_send_uint32(conn, strlen(request_serialized));
 
     if (rv != APR_SUCCESS) {
-        free((void *)request_serialized);
+        redirectionio_string_drop(request_serialized);
         ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, "mod_redirectionio: Error sending request length: %s", apr_strerror(rv, errbuf, sizeof(errbuf)));
 
         return rv;
@@ -114,7 +114,7 @@ apr_status_t redirectionio_protocol_match(redirectionio_connection *conn, redire
 
     // Send serialized request
     rv = redirectionio_send_string(conn, request_serialized, strlen(request_serialized));
-    free((void *)request_serialized);
+    redirectionio_string_drop(request_serialized);
 
     if (rv != APR_SUCCESS) {
         ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, "mod_redirectionio: Error sending request: %s", apr_strerror(rv, errbuf, sizeof(errbuf)));
@@ -176,7 +176,7 @@ apr_status_t redirectionio_protocol_log(redirectionio_connection *conn, redirect
     rv = redirectionio_send_protocol_header(conn, project_key, REDIRECTIONIO_PROTOCOL_COMMAND_LOG, r);
 
     if (rv != APR_SUCCESS) {
-        free((char *)log);
+        redirectionio_string_drop(log);
 
         return rv;
     }
@@ -186,7 +186,7 @@ apr_status_t redirectionio_protocol_log(redirectionio_connection *conn, redirect
 
     if (rv != APR_SUCCESS) {
         ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, "mod_redirectionio: Error sending log command length: %s", apr_strerror(rv, errbuf, sizeof(errbuf)));
-        free((char *)log);
+        redirectionio_string_drop(log);
 
         return rv;
     }
@@ -195,12 +195,12 @@ apr_status_t redirectionio_protocol_log(redirectionio_connection *conn, redirect
 
     if (rv != APR_SUCCESS) {
         ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, "mod_redirectionio: Error sending log command data: %s", apr_strerror(rv, errbuf, sizeof(errbuf)));
-        free((char *)log);
+        redirectionio_string_drop(log);
 
         return rv;
     }
 
-    free((char *)log);
+    redirectionio_string_drop(log);
 
     return APR_SUCCESS;
 }
@@ -439,7 +439,6 @@ static apr_status_t redirectionio_send_protocol_header(redirectionio_connection 
 }
 
 apr_status_t redirectionio_context_cleanup(void *context) {
-    struct REDIRECTIONIO_HeaderMap  *first_header, *tmp_header;
     redirectionio_context           *ctx = (redirectionio_context *)context;
 
     if (ctx->request != NULL) {
@@ -452,18 +451,7 @@ apr_status_t redirectionio_context_cleanup(void *context) {
     }
 
     if (ctx->response_headers != NULL) {
-        first_header = (struct REDIRECTIONIO_HeaderMap *)ctx->response_headers;
-
-        while (first_header != NULL) {
-            tmp_header = first_header->next;
-
-            free((void *)first_header->name);
-            free((void *)first_header->value);
-            free((void *)first_header);
-
-            first_header = tmp_header;
-        }
-
+        redirectionio_header_map_drop(ctx->response_headers);
         ctx->response_headers = NULL;
     }
 
