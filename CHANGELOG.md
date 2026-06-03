@@ -1,8 +1,13 @@
-## 3.1.1 - 03-06-2026
+## 3.1.2 - 03-06-2026
 
 * Decouple memory drop / alloc when using libredirectionio to avoid separate allocator issue
 * Remove focal build
 * Make connection pool thread safe to avoid potential race condition when using mpm_event
+
+## 3.1.1 - 16-04-2026
+
+* Use a better field to retrieve client ip (which works better with other modules interaction)
+* Reuse ctx in case of internal redirect to filter the correct request
 
 ## 3.1.0 - 04-04-2026
 
