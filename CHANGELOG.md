@@ -1,3 +1,9 @@
+## 3.1.1 - 03-06-2026
+
+* Decouple memory drop / alloc when using libredirectionio to avoid separate allocator issue
+* Remove focal build
+* Make connection pool thread safe to avoid potential race condition when using mpm_event
+
 ## 3.1.0 - 04-04-2026
 
 * Update libredirectionio to 3.1.0
