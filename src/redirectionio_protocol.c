@@ -243,6 +243,13 @@ apr_status_t redirectionio_protocol_send_filter_headers(redirectionio_context *c
     }
 
     first_header = (struct REDIRECTIONIO_HeaderMap *)redirectionio_action_header_filter_filter(ctx->action, first_header, ctx->backend_response_status_code, config->show_rule_ids == 1);
+
+    // Free old response headers if set (can happen on internal redirects where
+    // the context is reused and this filter runs again)
+    if (ctx->response_headers != NULL) {
+        redirectionio_header_map_drop(ctx->response_headers);
+    }
+
     ctx->response_headers = first_header;
 
     // Even if error returns success, as it does not affect anything
@@ -453,6 +460,13 @@ apr_status_t redirectionio_context_cleanup(void *context) {
     if (ctx->response_headers != NULL) {
         redirectionio_header_map_drop(ctx->response_headers);
         ctx->response_headers = NULL;
+    }
+
+    // Drop the body filter if the response never reached EOS in the body
+    // filtering (aborted connection, error path, HEAD request, ...)
+    if (ctx->body_filter != NULL) {
+        redirectionio_action_body_filter_drop(ctx->body_filter);
+        ctx->body_filter = NULL;
     }
 
     return APR_SUCCESS;

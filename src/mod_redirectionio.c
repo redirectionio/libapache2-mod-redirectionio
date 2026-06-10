@@ -35,6 +35,7 @@ static void *merge_redirectionio_dir_conf(apr_pool_t *pool, void *BASE, void *AD
 static apr_status_t redirectionio_pool_construct(void** rs, void* params, apr_pool_t* pool);
 static apr_status_t redirectionio_pool_destruct(void* resource, void* params, apr_pool_t* pool);
 static apr_status_t redirectionio_child_exit(void *resource);
+static apr_status_t redirectionio_trusted_proxies_cleanup(void *trusted_proxies);
 
 static const char *redirectionio_set_enable(cmd_parms *cmd, void *cfg, const char *arg);
 static const char *redirectionio_set_project_key(cmd_parms *cmd, void *cfg, const char *arg);
@@ -761,6 +762,8 @@ static apr_status_t redirectionio_child_exit(void *resource) {
         apr_pool_create(&pool, NULL);
 
         ap_log_perror(APLOG_MARK, APLOG_ERR, 0, pool, "mod_redirectionio: Socket pool not empty: %i", apr_reslist_acquired_count(connection_pool));
+
+        apr_pool_destroy(pool);
     }
 
     apr_reslist_destroy(connection_pool);
@@ -968,9 +971,21 @@ static const char *redirectionio_set_trusted_proxies(cmd_parms *cmd, void *cfg, 
 
     if (conf) {
         conf->trusted_proxies = (struct REDIRECTIONIO_TrustedProxies *) redirectionio_trusted_proxies_create(arg);
+
+        // The trusted proxies object is allocated by the rust library, drop it
+        // when the configuration pool goes away (e.g. on graceful restart)
+        if (conf->trusted_proxies != NULL) {
+            apr_pool_cleanup_register(conf->pool, conf->trusted_proxies, redirectionio_trusted_proxies_cleanup, apr_pool_cleanup_null);
+        }
     }
 
     return NULL;
+}
+
+static apr_status_t redirectionio_trusted_proxies_cleanup(void *trusted_proxies) {
+    redirectionio_trusted_proxies_drop((struct REDIRECTIONIO_TrustedProxies *)trusted_proxies);
+
+    return APR_SUCCESS;
 }
 
 static const char *redirectionio_trace_enable(cmd_parms *cmd, void *cfg) {
