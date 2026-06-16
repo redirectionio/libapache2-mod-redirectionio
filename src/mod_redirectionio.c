@@ -325,6 +325,7 @@ static apr_status_t redirectionio_filter_match_on_response(ap_filter_t *f, apr_b
 
 static apr_status_t redirectionio_filter_header_filtering(ap_filter_t *f, apr_bucket_brigade *bb) {
     redirectionio_context   *ctx = (redirectionio_context *)f->ctx;
+    struct REDIRECTIONIO_HeaderMap *original_response_headers = NULL;
 
     if (ctx == NULL) {
         return ap_pass_brigade(f->next, bb);
@@ -334,17 +335,36 @@ static apr_status_t redirectionio_filter_header_filtering(ap_filter_t *f, apr_bu
         return ap_pass_brigade(f->next, bb);
     }
 
+    if (ctx->body_filter == NULL) {
+        // Capture backend response headers before redirection.io mutates them,
+        // so body filters (e.g. html_to_markdown) evaluate the original content type.
+        if (redirectionio_protocol_capture_response_headers(f->r, &original_response_headers) != APR_SUCCESS) {
+            return ap_pass_brigade(f->next, bb);
+        }
+
+        // Create body filter before header filtering, as header filtering can
+        // mutate action state and prevent body filter creation.
+        ctx->body_filter = (struct REDIRECTIONIO_FilterBodyAction *)redirectionio_action_body_filter_create(
+            ctx->action,
+            ctx->backend_response_status_code,
+            original_response_headers
+        );
+        ctx->proxy_response_time = apr_time_now() / 1000;
+    }
+
     redirectionio_protocol_send_filter_headers(ctx, f->r);
     ap_remove_output_filter(f);
 
     if (ctx->body_filter == NULL) {
-        ctx->body_filter = (struct REDIRECTIONIO_FilterBodyAction *)redirectionio_action_body_filter_create(ctx->action, ctx->backend_response_status_code, ctx->response_headers);
-        ctx->proxy_response_time = apr_time_now() / 1000;
-
         // Force chunked encoding
         if (ctx->body_filter != NULL) {
             apr_table_unset(f->r->headers_out, "Content-Length");
         }
+    }
+
+    // Force chunked encoding
+    if (ctx->body_filter != NULL) {
+        apr_table_unset(f->r->headers_out, "Content-Length");
     }
 
     return ap_pass_brigade(f->next, bb);

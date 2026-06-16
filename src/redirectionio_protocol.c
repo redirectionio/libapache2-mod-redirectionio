@@ -206,40 +206,12 @@ apr_status_t redirectionio_protocol_log(redirectionio_connection *conn, redirect
 }
 
 apr_status_t redirectionio_protocol_send_filter_headers(redirectionio_context *ctx, request_rec *r) {
-    const apr_array_header_t        *tarr = apr_table_elts(r->headers_out);
-    const apr_table_entry_t         *telts = (const apr_table_entry_t*)tarr->elts;
-    int                             i;
     char                            *name_str, *value_str;
-    struct REDIRECTIONIO_HeaderMap  *first_header = NULL, *current_header = NULL;
+    struct REDIRECTIONIO_HeaderMap  *first_header = NULL;
     redirectionio_config            *config = (redirectionio_config*) ap_get_module_config(r->per_dir_config, &redirectionio_module);
 
-    // Create request header map
-    for (i = 0; i < tarr->nelts; i++) {
-        current_header = (struct REDIRECTIONIO_HeaderMap *) apr_palloc(r->pool, sizeof(struct REDIRECTIONIO_HeaderMap));
-
-        if (current_header == NULL) {
-            return APR_EGENERAL;
-        }
-
-        current_header->name = (const char *)telts[i].key;
-        current_header->value = (const char *)telts[i].val;
-        current_header->next = first_header;
-
-        first_header = current_header;
-    }
-
-    if (r->content_type) {
-        current_header = (struct REDIRECTIONIO_HeaderMap *) apr_palloc(r->pool, sizeof(struct REDIRECTIONIO_HeaderMap));
-
-        if (current_header == NULL) {
-            return APR_EGENERAL;
-        }
-
-        current_header->name = (const char *)"Content-Type";
-        current_header->value = (const char *)r->content_type;
-        current_header->next = first_header;
-
-        first_header = current_header;
+    if (redirectionio_protocol_capture_response_headers(r, &first_header) != APR_SUCCESS) {
+        return APR_EGENERAL;
     }
 
     first_header = (struct REDIRECTIONIO_HeaderMap *)redirectionio_action_header_filter_filter(ctx->action, first_header, ctx->backend_response_status_code, config->show_rule_ids == 1);
@@ -272,6 +244,43 @@ apr_status_t redirectionio_protocol_send_filter_headers(redirectionio_context *c
         }
 
         first_header = first_header->next;
+    }
+
+    return APR_SUCCESS;
+}
+
+apr_status_t redirectionio_protocol_capture_response_headers(request_rec *r, struct REDIRECTIONIO_HeaderMap **first_header) {
+    const apr_array_header_t        *tarr = apr_table_elts(r->headers_out);
+    const apr_table_entry_t         *telts = (const apr_table_entry_t*)tarr->elts;
+    struct REDIRECTIONIO_HeaderMap  *current_header;
+    int                             i;
+
+    for (i = 0; i < tarr->nelts; i++) {
+        current_header = (struct REDIRECTIONIO_HeaderMap *) apr_palloc(r->pool, sizeof(struct REDIRECTIONIO_HeaderMap));
+
+        if (current_header == NULL) {
+            return APR_EGENERAL;
+        }
+
+        current_header->name = (const char *)telts[i].key;
+        current_header->value = (const char *)telts[i].val;
+        current_header->next = *first_header;
+
+        *first_header = current_header;
+    }
+
+    if (r->content_type) {
+        current_header = (struct REDIRECTIONIO_HeaderMap *) apr_palloc(r->pool, sizeof(struct REDIRECTIONIO_HeaderMap));
+
+        if (current_header == NULL) {
+            return APR_EGENERAL;
+        }
+
+        current_header->name = (const char *)"Content-Type";
+        current_header->value = (const char *)r->content_type;
+        current_header->next = *first_header;
+
+        *first_header = current_header;
     }
 
     return APR_SUCCESS;

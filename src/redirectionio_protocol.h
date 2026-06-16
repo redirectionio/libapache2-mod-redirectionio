@@ -15,6 +15,7 @@ const char *ap_run_http_scheme(const request_rec *r);
 apr_status_t redirectionio_protocol_match(redirectionio_connection *conn, redirectionio_context *ctx, request_rec *r, const char *project_key);
 apr_status_t redirectionio_protocol_log(redirectionio_connection *conn, redirectionio_context *ctx, request_rec *r, const char *project_key);
 apr_status_t redirectionio_protocol_send_filter_headers(redirectionio_context *ctx, request_rec *r);
+apr_status_t redirectionio_protocol_capture_response_headers(request_rec *r, struct REDIRECTIONIO_HeaderMap **first_header);
 apr_status_t redirectionio_context_cleanup(void *redirectionio_context);
 
 #endif
