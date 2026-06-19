@@ -205,6 +205,53 @@ apr_status_t redirectionio_protocol_log(redirectionio_connection *conn, redirect
     return APR_SUCCESS;
 }
 
+/* Send a rule-count command for a request that was executed but not logged (its logging
+ * was disabled by a "configuration" action): only the applied rule ids are sent, to
+ * count their executions. */
+apr_status_t redirectionio_protocol_rule_count(redirectionio_connection *conn, redirectionio_context *ctx, request_rec *r, const char *project_key) {
+    apr_size_t      wlen;
+    apr_status_t    rv;
+    const char      *rule_ids;
+
+    rule_ids = redirectionio_action_get_applied_rule_ids(ctx->action);
+
+    if (rule_ids == NULL) {
+        return APR_SUCCESS;
+    }
+
+    // Send protocol header
+    rv = redirectionio_send_protocol_header(conn, project_key, REDIRECTIONIO_PROTOCOL_COMMAND_RULE_COUNT, r);
+
+    if (rv != APR_SUCCESS) {
+        redirectionio_string_drop(rule_ids);
+
+        return rv;
+    }
+
+    wlen = strlen(rule_ids);
+    rv = redirectionio_send_uint32(conn, wlen);
+
+    if (rv != APR_SUCCESS) {
+        ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, "mod_redirectionio: Error sending rule count command length: %s", apr_strerror(rv, errbuf, sizeof(errbuf)));
+        redirectionio_string_drop(rule_ids);
+
+        return rv;
+    }
+
+    rv = apr_socket_send(conn->rio_sock, rule_ids, &wlen);
+
+    if (rv != APR_SUCCESS) {
+        ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, "mod_redirectionio: Error sending rule count command data: %s", apr_strerror(rv, errbuf, sizeof(errbuf)));
+        redirectionio_string_drop(rule_ids);
+
+        return rv;
+    }
+
+    redirectionio_string_drop(rule_ids);
+
+    return APR_SUCCESS;
+}
+
 apr_status_t redirectionio_protocol_send_filter_headers(redirectionio_context *ctx, request_rec *r) {
     char                            *name_str, *value_str;
     struct REDIRECTIONIO_HeaderMap  *first_header = NULL;

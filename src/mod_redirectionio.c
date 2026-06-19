@@ -487,6 +487,7 @@ static apr_status_t redirectionio_filter_body_filtering(ap_filter_t *f, apr_buck
 
 static int redirectionio_log_handler(request_rec *r) {
     bool                 should_log;
+    apr_status_t         rv;
     redirectionio_config *config = (redirectionio_config*) ap_get_module_config(r->per_dir_config, &redirectionio_module);
     request_rec          *response = r;
 
@@ -505,11 +506,14 @@ static int redirectionio_log_handler(request_rec *r) {
         response = response->next;
     }
 
-    should_log = redirectionio_action_should_log_request(context->action, config->enable_logs == 1, context->backend_response_status_code);
-
-    if (!should_log) {
+    // When logging is disabled at the module level (configuration), the request is not
+    // logged and its rules are not counted: the user opted this proxy out of traffic
+    // visibility.
+    if (config->enable_logs != 1) {
         return DECLINED;
     }
+
+    should_log = redirectionio_action_should_log_request(context->action, true, context->backend_response_status_code);
 
     redirectionio_connection* conn = redirectionio_acquire_connection(config, r->pool);
 
@@ -517,7 +521,15 @@ static int redirectionio_log_handler(request_rec *r) {
         return DECLINED;
     }
 
-    if (redirectionio_protocol_log(conn, context, r, config->project_key) != APR_SUCCESS) {
+    if (should_log) {
+        rv = redirectionio_protocol_log(conn, context, r, config->project_key);
+    } else {
+        // Logging was disabled for this request by a "configuration" action: still count
+        // the executed rules, without sending the full request log.
+        rv = redirectionio_protocol_rule_count(conn, context, r, config->project_key);
+    }
+
+    if (rv != APR_SUCCESS) {
         redirectionio_invalidate_connection(conn, config, r->pool);
 
         return DECLINED;
