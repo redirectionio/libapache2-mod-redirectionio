@@ -1,3 +1,9 @@
+## Unreleased
+
+* Fix use-after-free / segfault on child exit (mpm_event) introduced in 3.1.2: the connection pool
+  cleanup was registered on the parent pool, so the reslist was already freed (with its child pool)
+  by the time the cleanup ran. Register it on the reslist pool instead.
+
 ## 3.1.3 - 10-06-2026
 
 * Fix memory leaks in error scenario where some resources were not correctly cleaned

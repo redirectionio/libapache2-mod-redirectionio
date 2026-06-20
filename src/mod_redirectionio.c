@@ -154,7 +154,8 @@ static apr_status_t redirectionio_init_connection_pool(redirectionio_config *con
     }
 
     apr_reslist_timeout_set(config->connection_pool, config->server.timeout * 1000);
-    apr_pool_cleanup_register(config->pool, config->connection_pool, redirectionio_child_exit, apr_pool_cleanup_null);
+    // Register the cleanup on reslist_pool, which owns the reslist
+    apr_pool_cleanup_register(reslist_pool, config->connection_pool, redirectionio_child_exit, apr_pool_cleanup_null);
 
     return APR_SUCCESS;
 }
