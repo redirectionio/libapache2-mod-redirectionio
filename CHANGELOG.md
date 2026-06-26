@@ -1,5 +1,7 @@
-## Unreleased
+## 3.2.0 - 26-06-2026
 
+* Update libredirectionio to 3.2.0
+* Fix capture backend response headers to pass them to body filters before redirection.io mutates them
 * Fix use-after-free / segfault on child exit (mpm_event) introduced in 3.1.2: the connection pool
   cleanup was registered on the parent pool, so the reslist was already freed (with its child pool)
   by the time the cleanup ran. Register it on the reslist pool instead.
