@@ -523,10 +523,16 @@ static int redirectionio_log_handler(request_rec *r) {
 
     if (should_log) {
         rv = redirectionio_protocol_log(conn, context, r, config->project_key);
-    } else {
+    } else if (redirectionio_action_agent_supports_rule_count(context->action)) {
         // Logging was disabled for this request by a "configuration" action: still count
-        // the executed rules, without sending the full request log.
+        // the executed rules, without sending the full request log. Only when the agent
+        // understands the RULE_COUNT command (protocol >= 1.1), as advertised in the match
+        // response; sending it to an older agent would make it reject the unknown command
+        // and close the pooled connection, corrupting later requests.
         rv = redirectionio_protocol_rule_count(conn, context, r, config->project_key);
+    } else {
+        // Older agent without rule-count support: nothing to send for this request.
+        rv = APR_SUCCESS;
     }
 
     if (rv != APR_SUCCESS) {
