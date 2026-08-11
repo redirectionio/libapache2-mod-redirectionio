@@ -4,6 +4,9 @@ on:
     release:
         types: [ prereleased ]
 
+permissions:
+    contents: read
+
 jobs:
     trigger-release:
         runs-on: ubuntu-latest
