@@ -29,7 +29,7 @@ apr_status_t redirectionio_protocol_match(redirectionio_connection *conn, redire
     char                            *action_serialized;
     const apr_array_header_t        *tarr;
     const apr_table_entry_t         *telts;
-    int                             i;
+    int                             i, allow_scheme_override = 0;
     redirectionio_config            *config = (redirectionio_config*) ap_get_module_config(r->per_dir_config, &redirectionio_module);
 
     // Create request header map
@@ -75,7 +75,9 @@ apr_status_t redirectionio_protocol_match(redirectionio_connection *conn, redire
     scheme = config->scheme;
 
     if (scheme == NULL) {
+        // apache only reports https when it terminates TLS itself, so this is a guess
         scheme = r->parsed_uri.scheme ? r->parsed_uri.scheme : ap_http_scheme(r);
+        allow_scheme_override = 1;
     }
 
     ctx->request = (struct REDIRECTIONIO_Request *)redirectionio_request_create(r->unparsed_uri, r->hostname, scheme, r->method, first_header);
@@ -84,7 +86,9 @@ apr_status_t redirectionio_protocol_match(redirectionio_connection *conn, redire
         return APR_EGENERAL;
     }
 
-    redirectionio_request_set_remote_addr(ctx->request, r->useragent_ip, config->trusted_proxies);
+    // let a trusted proxy's Forwarded header correct what we could only guess; no directive forces
+    // the host on apache, so it is always overridable
+    redirectionio_request_set_forwarded(ctx->request, r->useragent_ip, config->trusted_proxies, (uint8_t)allow_scheme_override, 1);
 
     // Serialize request
     request_serialized = redirectionio_request_json_serialize(ctx->request);
