@@ -34,21 +34,8 @@ apr_status_t redirectionio_protocol_match(redirectionio_connection *conn, redire
 
     // Create request header map
     // First header from request
-    tarr = apr_table_elts(r->headers_in);
-    telts = (const apr_table_entry_t*)tarr->elts;
-
-    for (i = 0; i < tarr->nelts; i++) {
-        current_header = (struct REDIRECTIONIO_HeaderMap *) apr_palloc(r->pool, sizeof(struct REDIRECTIONIO_HeaderMap));
-
-        if (current_header == NULL) {
-            return APR_EGENERAL;
-        }
-
-        current_header->name = (const char *)telts[i].key;
-        current_header->value = (const char *)telts[i].val;
-        current_header->next = first_header;
-
-        first_header = current_header;
+    if (redirectionio_protocol_capture_request_headers(r, &first_header) != APR_SUCCESS) {
+        return APR_EGENERAL;
     }
 
     // Then header from config
@@ -296,6 +283,64 @@ apr_status_t redirectionio_protocol_send_filter_headers(redirectionio_context *c
 
         first_header = first_header->next;
     }
+
+    return APR_SUCCESS;
+}
+
+apr_status_t redirectionio_protocol_capture_request_headers(request_rec *r, struct REDIRECTIONIO_HeaderMap **first_header) {
+    const apr_array_header_t        *tarr = apr_table_elts(r->headers_in);
+    const apr_table_entry_t         *telts = (const apr_table_entry_t*)tarr->elts;
+    struct REDIRECTIONIO_HeaderMap  *current_header;
+    int                             i;
+
+    for (i = 0; i < tarr->nelts; i++) {
+        current_header = (struct REDIRECTIONIO_HeaderMap *) apr_palloc(r->pool, sizeof(struct REDIRECTIONIO_HeaderMap));
+
+        if (current_header == NULL) {
+            return APR_EGENERAL;
+        }
+
+        current_header->name = (const char *)telts[i].key;
+        current_header->value = (const char *)telts[i].val;
+        current_header->next = *first_header;
+
+        *first_header = current_header;
+    }
+
+    return APR_SUCCESS;
+}
+
+apr_status_t redirectionio_protocol_filter_request_headers(redirectionio_context *ctx, request_rec *r) {
+    struct REDIRECTIONIO_HeaderMap  *reversed_headers = NULL, *first_header = NULL, *current_header, *next_header;
+    const struct REDIRECTIONIO_HeaderMap *filtered_headers, *filtered_header;
+
+    if (redirectionio_protocol_capture_request_headers(r, &reversed_headers) != APR_SUCCESS) {
+        return APR_EGENERAL;
+    }
+
+    // Captured headers are in reverse order, the filter keeps the order it is given
+    for (current_header = reversed_headers; current_header != NULL; current_header = next_header) {
+        next_header = current_header->next;
+        current_header->next = first_header;
+        first_header = current_header;
+    }
+
+    filtered_headers = redirectionio_action_request_header_filter_filter(ctx->action, first_header);
+
+    // No request header filter for this action: leave the request untouched
+    if (filtered_headers == NULL) {
+        return APR_SUCCESS;
+    }
+
+    apr_table_clear(r->headers_in);
+
+    for (filtered_header = filtered_headers; filtered_header != NULL; filtered_header = filtered_header->next) {
+        if (filtered_header->name != NULL && filtered_header->value != NULL) {
+            apr_table_addn(r->headers_in, apr_pstrdup(r->pool, filtered_header->name), apr_pstrdup(r->pool, filtered_header->value));
+        }
+    }
+
+    redirectionio_header_map_drop(filtered_headers);
 
     return APR_SUCCESS;
 }

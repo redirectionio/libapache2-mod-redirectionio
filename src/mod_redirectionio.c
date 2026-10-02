@@ -240,6 +240,12 @@ static int redirectionio_match_handler(request_rec *r) {
 
     redirectionio_release_connection(conn, config, r->pool);
 
+    // A redirection is answered by the module, so the request never reaches the backend. A
+    // sub request copies the headers of its main request, which are already filtered.
+    if (r->main == NULL && ctx->action != NULL && redirectionio_action_get_status_code(ctx->action, 0) == 0) {
+        redirectionio_protocol_filter_request_headers(ctx, r);
+    }
+
     return DECLINED;
 }
 
