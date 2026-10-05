@@ -1,5 +1,6 @@
-## Unreleased
+## 3.4.0 - 05-10-2026
 
+* Update libredirectionio to 3.4.0: support the "tag logs" rule action and the `response_header` variable, drop a default port (80 or 443) from the request host
 * Take the scheme and the host from a trusted proxy's `Forwarded` header (RFC 7239) when they could only be guessed. `X-Forwarded-Proto` and `X-Forwarded-Host` stay untrusted, use `redirectionioScheme` to build the value from them
 * Without `redirectionioTrustedProxies`, the loopback and the private networks are trusted by default, so this applies there too
 * Apply the request header filters of the matched rules to the request forwarded to the backend (add, replace, override, remove or default a header)
